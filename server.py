@@ -6,9 +6,27 @@ import threading  # заменить на настоящуюю многопот�
 import hashlib
 
 
+class User:
+    # Структура, содержащая данные о клиенте
+    def __init__(self, socket: socket.socket, client_id: int = None, address: str = None):
+        self.socket = socket
+        self.id = client_id
+        self.address = address
+
+
+class Message:
+    # Структура содержащая данные о сообщении
+    def __init__(self, message_type: int = None, receiver_id: int = None, sender_id: int = None, length: int = None, bytes_message: bytes = None):
+        self.message_type = message_type
+        self.receiver_id = receiver_id
+        self.length = length
+        self.bytes_message = bytes_message
+        self.sender_id = sender_id
+
+
 class Server:
 
-    connected_sockets = dict()  # список подключенных сокетов (клиентов) client_id: client_socket
+    connected_users = dict()  # список подключенных user'ов (клиентов) client_id: user
     host = ''  # Подключение принимаем от любого компьютера в сети
     max_queue = 5  # число соединений, которые будут находиться в очереди соединений до вызова accept
     # список команд доступных для сервера
@@ -22,78 +40,134 @@ class Server:
         # порт - номер порта который принимает соединение
         self.server_socket.bind((self.host, port_to_connect))
         self.server_socket.listen(self.max_queue)
-        self.database = Database()
+        self.thread_locals = threading.local()
+        # Инициализируем базу данных
+        Database(need_init=True)
 
     @staticmethod
-    def get_message_from_client(client_socket, data=None):
+    def get_hash(string: str, hash_func=hashlib.sha1) -> str:
+        return hash_func(string).hexidigest()
 
-        if not data:  # служебное сообщение, с данными о клиентсвом сообщении, должно умещаться в один mes_size
-            b_message = client_socket.recv(mes_size)  # b_message = b'REQ_TYPE, ...' - ints
-        else:  # сообщение от клиента
-            # data = b'length, id, ...'
-            length = data[0] + len(data)
-            client_id = data[1]
-            b_message = data
-            while len(b_message) < length:
-                data = client_socket.recv(min(mes_size, length - len(b_message)))  # Нужно получить не больше чем осталось от сообщения, иначе можно получить начало следующего
-                b_message += data
+    @staticmethod
+    def get_message_from_client(user: User) -> MESSAGE:
 
-        return b_message
+        # служебное сообщение, с данными о клиентсвом сообщении, должно умещаться в один mes_size
+        message_data = user.socket.recv(mes_size)  # message_data = b'MESS_TYPE length receiver_id ...'
+        if not message_data:  # Клиент отключился
+            return None
+        message_data.split()
 
-    def send_message(self, id_to_send=None, client_socket=None, message=None):
-        if not id_to_send and not client_socket or not message:
+        length = int(message_data[1])
+        b_message = ""
+        while len(b_message) < length:
+            # Нужно получить не больше чем осталось от сообщения, иначе можно получить начало следующего
+            message_part = user.socket.recv(min(mes_size, length - len(b_message)))
+            if not message_part:  # Клиент отключился
+                b_message = None
+                break
+            b_message += message_part
+        message = MESSAGE(message_type=int(message_data[0]),
+                          receiver_id=message_data[2],
+                          message_length=length,
+                          bytes_message=b_message
+                          )
+        return message
+
+    def send_message_to_client(self, receiver: User, message_data: bytes, message: bytes) -> None:
+        # Возможно, параметр receiver - ненужен, и вообще метод возможно следует сделать статичкским
+        if not receiver.id and not receiver.socket or not message_data:
             return
-        elif not client_socket:
-            self.connected_sockets[id_to_send].sendall(message)
+        elif not receiver.socket:
+            client_socket = self.connected_users[receiver.id]
         else:
-            client_socket.sendall(message)
+            client_socket = receiver.socket
+        client_socket.sendall(message_data)
+        client_socket.sendall(message)
 
-    def process_command(self, client_socket, data):
-        pass
+    def process_command(self, user: User, message: MESSAGE) -> int:
+        if not message.bytes_message:
+            return False
+        # message.bytes_message = b'command_type ...'
+        data = message.bytes_message.split()
+        data[0] = int(data[0])
+        if data[0] == REGISTER_USER:
+            # message.bytes_message  = b'... login password'
+            uid = self.thread_locals.database.add_user(data[1], Server.get_hash(data[2]))
+            return uid
+        elif data[0] == DELETE_USER:
+            if not user.id:
+                return False
+            self.thread_locals.database.delete_user(user.id)
+            return True
+        elif data[0] == AUTHENTICATE_USER:
+            if not user.socket or not self.client_authentication(user):
+                return False
+            return True
 
-    def client_authentication(self, client_socket):
+    @staticmethod
+    def get_prepared_message(message: MESSAGE) -> tuple(bytes, bytes):
+        message.length = len(message.bytes_message)
+        message_data = bytes("{message_type} {length} {sender_id}".format(
+                        message_type=message.message_type, length=message.length, sender_id=message.sender_id
+                        ), encoding)
+
+        return message_data, message.bytes_message
+
+    def client_authentication(self, user: User) -> bool:
         # secure_context = ssl.create_default_context()  # возможно нужен не дефолтный контекст, почитать
         # ssl_client = secure_context.wrap_socket(client, server_side=True)
-        login, password = get_message_from_client(client_socket).split()  # просто тестирование
-        client_exist = self.database.check_person(login, hashlib.sha1(password).hexdigest())
-        return client_exist
 
-    def process_client(self, client_socket, client_address):
+        response_message = MESSAGE(message_type=COMMAND, sender_id=user.id)
+        while user.id is None or user.id < 1:
+            if user.id == WRONG_LOGIN:
+                response_message.bytes_string = bytes(str(WRONG_LOGIN), encoding)
+                self.send_message_to_client(user, *Server.get_prepared_message(response_message))
+            elif user.id == WRONG_PASSWORD:
+                response_message.bytes_string = bytes(str(WRONG_PASSWORD), encoding)
+                self.send_message_to_client(user, *Server.get_prepared_message(response_message))
+            message = Server.get_message_from_client(user)
+            if not message.bytes_message:
+                return False
+            login, password = message.bytes_message.split()  # просто для тестирования, потом будет шифрование и т.д.
+            user.id = self.thread_locals.database.check_person(login, Server.get_hash(password))
+        response_message.bytes_string = bytes(str(AUTHENTICATION_SUCCESS), encoding)
+        self.send_message_to_client(user, *Server.get_prepared_message(response_message))
+        return True
+
+    def process_message(self, message: MESSAGE) -> None:
+        receiver = self.connected_users[message.receiver_id]
+        self.send_message_to_client(receiver, *Server.get_prepared_message(message))
+
+    def process_client(self, user: User) -> None:
         # Возможно, что при заверщении работы сервера будет обращение к закрытому клиентскому сокету, и вылезет ошибка,
         # но это не страшно, просто нужно написать какой-нибудь обработчик или закрыть
 
-        client_id = self.client_authentication()
-
-        while client_id < 1:
-            if not client_id:
-                self.send_message(client_socket=client_socket, message=b"Пользователя с таким логином не существует")
-            if client_id < 0:
-                self.send_message(client_socket=client_socket, message=b"Неверный пароль")
-            client_id = self.client_authentication()
-
-        self.connected_sockets[client_id] = client_socket
-
+        self.thread_locals.database = Database()
+        authenticated = self.client_authentication(user)
+        if not authenticated:
+            return
+        self.connected_users[user.id] = user
         try:
             while True:
-                data = self.get_message_from_client(client_socket)  # data = b'REQ_TYPE, ...' - ints
-                if not data:
+                message = Server.get_message_from_client(user)
+                if not message.bytes_message:
                     break
-                if data[0] == MESSAGE:
-                    self.process_message(client_socket, data[1:])
-                elif data[0] == COMMAND:
-                    self.process_command(client_socket, data[1:])
+                if message.message_type == MESSAGE:
+                    self.process_message(message)
+                elif message.message_type == COMMAND:
+                    self.process_command(user, message)
                 else:
                     pass
         except Exception as e:
-            pass
+            print("Exception: {}".format(e.args[0]))
         finally:
-            client_socket.shutdown(socket.SHUT_RDWR)
-            client_socket.close()
-            self.connected_sockets.pop(client_id)
-            print("disconnected: {}".format(client_address))
+            user.socket.shutdown(socket.SHUT_RDWR)
+            user.socket.close()
+            self.connected_users.pop(user.id)
+            print("disconnected: {}".format(user.address))
 
     # нужно научиться нормально завершать сервер
-    def server_command_handler(self):
+    def server_command_handler(self) -> None:
         while True:
             command = input()
             if not command.startswith('/'):
@@ -102,27 +176,29 @@ class Server:
                 for c in self.commands:
                     print(c)
             if command == '/end':
-                for c in self.connected_sockets:
-                    c.shutdown(socket.SHUT_RDWR)
-                    c.close()
-                self.connected_sockets.clear()
+                for c in self.connected_users:
+                    c.socket.shutdown(socket.SHUT_RDWR)
+                    c.socket.close()
+                self.connected_users.clear()
                 self.server_socket.close()
                 self.server_socket.shutdown(2)
                 print("server stopped")
                 break
 
-    def run(self):
-
+    def run(self) -> None:
         command_handler = threading.Thread(target=self.server_command_handler)
         command_handler.start()
-
         print("type /commands to see a list of available commands")
-        print("the server is running\nhost: {}, port: {}".format(socket.gethostbyname(socket.getfqdn()), port_to_connect))
+        print("the server is running\nhost: {}, port: {}".format(
+            socket.gethostbyname(socket.getfqdn()),
+            port_to_connect)
+        )
 
         while True:
             connected_socket, connected_addres = self.server_socket.accept()
             print("connected:", connected_addres)
-            send_thread = threading.Thread(target=self.process_client, args=(connected_socket, connected_addres))
+            user = User(socket=connected_socket, address=connected_addres)
+            send_thread = threading.Thread(target=self.process_client, args=(user,))
             send_thread.start()
 
 
