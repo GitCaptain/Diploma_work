@@ -1,8 +1,8 @@
 
 # General consts
-encoding = "utf-8"
-port_to_connect = 9090
-mes_size = 4096
+ENCODING = "utf-8"
+PORT_TO_CONNECT = 9090
+MESSAGE_SIZE = 4096
 
 # Request Consts
 MESSAGE = 1
@@ -16,6 +16,9 @@ DELETE_USER = 3
 # Database consts
 WRONG_PASSWORD = -1
 WRONG_LOGIN = 0
+USER_ALREADY_EXIST = 0
 
 # Server response
 AUTHENTICATION_SUCCESS = 1
+REGISTRATION_SUCCESS = 2
+NOT_AUTHENTICATED = 3

@@ -12,21 +12,13 @@ class Database:
             elif path:
                 self.database_connection = sql.connect(path)
             else:
-                self.database_connection = sql.connect("data/users_database.db")
+                self.database_connection = sql.connect("data/users_database.sqlite")
         except sql.Error as e:
             print("database connection error: {}", e.args[0])
-        self.max_user_id = 0
         self.cursor = self.database_connection.cursor()
+
         if need_init:
             self.init_database()
-
-    def init_database(self):
-        # Создаем все необходимые таблицы, если их еще нет
-        self.cursor.execute("CREATE TABLE IF NOT EXISTS user_list("
-                            "uid INTEGER PRIMARY KEY NOT NULL, "
-                            "login TEXT NOT NULL, "
-                            "hashed_password TEXT NOT NULL"
-                            ");")
 
         # получаем максимальный номер user'a
         self.cursor.execute("SELECT MAX(uid) "
@@ -35,7 +27,15 @@ class Database:
         if not self.max_user_id:  # таблица создана только что
             self.max_user_id = 0
 
-    def check_person(self, login: str, hashed_password: str) -> int:
+    def init_database(self) -> None:
+        # Создаем все необходимые таблицы, если их еще нет
+        self.cursor.execute("CREATE TABLE IF NOT EXISTS user_list("
+                            "uid INTEGER PRIMARY KEY NOT NULL, "
+                            "login TEXT NOT NULL, "
+                            "hashed_password TEXT NOT NULL"
+                            ");")
+
+    def check_person(self, login: str, hashed_password: str, pre_registration_check: bool = False) -> int:
         self.cursor.execute("SELECT uid, hashed_password "
                             "FROM user_list "
                             "WHERE login=:login;",
@@ -43,22 +43,22 @@ class Database:
         query_result = self.cursor.fetchone()
         if not query_result:  # пользователя не существует
             return WRONG_LOGIN
-        elif hashed_password != query_result[1]:
+        elif hashed_password != query_result[1] and not pre_registration_check:
             return WRONG_PASSWORD  # неверный пароль
         else:
             return query_result[0]  # возвращаем uid пользователя
 
-    def get_users_count(self):
+    def get_users_count(self) -> int:
         self.cursor.execute("SELECT "
                             "COUNT(*)"
                             "FROM user_list;")
         return self.cursor.fetchone()[0]
 
-    def add_user(self, login: str, hashed_password: str):
+    def add_user(self, login: str, hashed_password: str) -> int:
         # !!! ТОЛЬКО ОДИН ПОЛЬЗОВАТЕЛЬ МОЖЕТ РЕГИСТРИРОВАТЬСЯ, ОДНОВРЕМЕННО НЕСКОЛЬКИМ НЕЛЬЗЯ, Т.К. ЭТО СЛОМАЕТ
         # max_user_id И ТОГДА ГГ БАЗЕ ДАННЫХ (ВОЗМОЖНО СЛЕДУЕТ ПРИДУМАТЬ ДРУГОЙ СПОСОБ РЕГИСТРАЦИИ)
-        if self.check_person(login, hashed_password) > 0:  # пользователь уже существует
-            return False
+        if self.check_person(login, hashed_password, pre_registration_check=True) > 0:  # пользователь уже существует
+            return USER_ALREADY_EXIST
         self.max_user_id += 1
         self.cursor.execute("INSERT INTO user_list "
                             "VALUES(:uid, :login, :hpass);",
@@ -66,13 +66,13 @@ class Database:
         self.database_connection.commit()
         return self.max_user_id
 
-    def delete_user(self, user_id: int):
+    def delete_user(self, user_id: int) -> None:
         self.cursor.execute("DELETE FROM user_list "
                             "WHERE uid=:uid",
                             {"uid": user_id})
         self.database_connection.commit()
 
-    def update_user_password(self, user_id, new_hashed_password):
+    def update_user_password(self, user_id, new_hashed_password) -> None:
         self.cursor.execute("UPDATE user_list "
                             "SET hashed_password=:hashed_password "
                             "WHERE uid=:uid",
