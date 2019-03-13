@@ -24,15 +24,15 @@ class Server:
         self.server_socket.listen(self.max_queue)
         self.thread_locals = threading.local()
         # Инициализируем базу данных
-        Database(need_init=True)
+        Database(need_server_init=True)
 
-    def process_command(self, user: User, message: Message) -> bool:
+    def process_command(self, user: User, message: Message) -> bool:  # разнести все по функциям
         # message.bytes_message = b'command_type ...'
         data = message.bytes_message.split()
         command = int(data[0])
         if not self.thread_locals.user_authenticated and command != AUTHENTICATE_USER and command != REGISTER_USER:
             message = Message(message_type=COMMAND, bytes_message=get_bytes_string(str(NOT_AUTHENTICATED)))
-            send_message_to_client(user, *get_prepared_message(message))
+            send_message_to_client(user, message)
             return False
         if command == REGISTER_USER:
             # message.bytes_message  = b'... login password'
@@ -40,9 +40,11 @@ class Server:
                 return False
             return True
         elif command == DELETE_USER:  # переработать, вынести в отдельную функцию
+            self.thread_locals.user_authenticated = False
             if not user.id:
                 return False
             self.thread_locals.database.delete_user(user.id)
+            user.id = 0
             return True
         elif command == AUTHENTICATE_USER:
             # message.bytes_message  = b'... login password'
@@ -58,7 +60,22 @@ class Server:
                 message.bytes_message = get_bytes_string(str(USER_NOT_EXIST))
             else:
                 message.bytes_message = get_bytes_string(str(USER_FOUND) + " " + str(uid) + " " + login)
-            send_message_to_client(user, *get_prepared_message(message))
+            send_message_to_client(user, message)
+        elif command == LOG_OUT:  # переработать, вынести в отдельную функцию
+            self.thread_locals.user_authenticated = False
+            if not user.id:
+                return False
+            user.id = 0
+            return True
+        elif command == GET_PENDING_MESSAGES:
+            pendings = self.thread_locals.database.get_pending_messages(user.id)
+            message = Message(message_type=MESSAGE, receiver_id=user.id)
+            for sender_id, bytes_message in pendings:
+                message.sender_id = sender_id
+                message.bytes_message = bytes_message
+                send_message_to_client(user, message)
+        else:
+            pass
 
     def client_registration(self, user: User, login, password) -> bool:
         uid = self.thread_locals.database.add_user(login, get_hash(password))
@@ -66,13 +83,13 @@ class Server:
         response_message = Message(message_type=COMMAND, sender_id=user.id)
         if uid == DB_USER_ALREADY_EXIST:
             response_message.bytes_message = get_bytes_string(str(USER_ALREADY_EXIST))
-            send_message_to_client(user, *get_prepared_message(response_message))
+            send_message_to_client(user, response_message)
             return False
         user.id = uid
         self.thread_locals.user_authenticated = True
         self.connected_users[user.id] = user
         response_message.bytes_message = get_bytes_string(str(REGISTRATION_SUCCESS) + " " + str(uid))
-        send_message_to_client(user, *get_prepared_message(response_message))
+        send_message_to_client(user, response_message)
         return True
 
     def client_authentication(self, user: User, login, password) -> bool:
@@ -82,22 +99,34 @@ class Server:
         response_message = Message(message_type=COMMAND, sender_id=user.id)
         if uid == DB_WRONG_LOGIN:
             response_message.bytes_message = get_bytes_string(str(WRONG_LOGIN))
-            send_message_to_client(user, *get_prepared_message(response_message))
+            send_message_to_client(user, response_message)
             return False
         elif uid == DB_WRONG_PASSWORD:
             response_message.bytes_message = get_bytes_string(str(WRONG_PASSWORD))
-            send_message_to_client(user, *get_prepared_message(response_message))
+            send_message_to_client(user, response_message)
             return False
         user.id = uid
         self.thread_locals.user_authenticated = True
         self.connected_users[user.id] = user
         response_message.bytes_message = get_bytes_string(str(AUTHENTICATION_SUCCESS) + " " + str(uid))
-        send_message_to_client(user, *get_prepared_message(response_message))
+        send_message_to_client(user, response_message)
         return True
 
     def process_message(self, message: Message) -> None:
-        receiver = self.connected_users[message.receiver_id]
-        send_message_to_client(receiver, *get_prepared_message(message))
+        if message.receiver_id in self.connected_users:
+            receiver = self.connected_users[message.receiver_id]
+            send_message_to_client(receiver, message)
+        elif self.thread_locals.database.check_if_user_exist(user_id=message.receiver_id):
+            self.thread_locals.database.add_pending_message(sender_id=message.sender_id,
+                                                            receiver_id=message.receiver_id,
+                                                            bytes_message=message.bytes_message)
+        else:
+            receiver = self.connected_users[message.sender_id]
+            message.receiver_id = message.sender_id
+            message.sender_id = 0
+            message.message_type = COMMAND
+            message.bytes_message = get_bytes_string(str(USER_NOT_EXIST))
+            send_message_to_client(receiver, message)
 
     def process_client(self, user: User) -> None:
         # Возможно, что при заверщении работы сервера будет обращение к закрытому клиентскому сокету, и вылезет ошибка,

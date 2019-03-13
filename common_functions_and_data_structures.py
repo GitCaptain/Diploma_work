@@ -33,9 +33,10 @@ def get_message_from_client(user: User) -> Message:
     if not message_data:  # Клиент отключился
         return Message()
     message_data = message_data.split()
+    message_type = int(message_data[0])
+    length = int(message_data[1])
     receiver_id = int(message_data[2])
     sender_id = int(message_data[3])
-    length = int(message_data[1])
     b_message = b""
     while len(b_message) < length:
         # Нужно получить не больше чем осталось от сообщения, иначе можно получить начало следующего
@@ -44,7 +45,7 @@ def get_message_from_client(user: User) -> Message:
             b_message = None
             break
         b_message += message_part
-    message = Message(message_type=int(message_data[0]),
+    message = Message(message_type=message_type,
                       receiver_id=receiver_id,
                       sender_id=sender_id,
                       length=length,
@@ -64,7 +65,8 @@ def get_prepared_message(message: Message) -> (bytes, bytes):
     return message_data, message.bytes_message
 
 
-def send_message_to_client(receiver: User, message_data: bytes, message: bytes) -> None:
+def send_message_to_client(receiver: User, message: Message) -> None:
+    message_data, message = get_prepared_message(message)
     if not receiver.socket or not message_data:
         return
     receiver.socket.sendall(message_data)

@@ -24,6 +24,9 @@ class Client:
         server_handler_thread = threading.Thread(target=self.server_handler)
         server_handler_thread.start()
 
+        get_pending_thread = threading.Thread(target=self.get_pending_messages)
+        get_pending_thread.start()
+
         user_handler_thread = threading.Thread(target=self.user_handler)
         user_handler_thread.start()
 
@@ -43,6 +46,12 @@ class Client:
             print("Exception: {}".format(e))
         finally:
             pass
+
+    def get_pending_messages(self) -> None:
+        while not self.id:
+            pass
+        message = Message(message_type=COMMAND, bytes_message=get_bytes_string(str(GET_PENDING_MESSAGES)))
+        send_message_to_client(self.server, message)
 
     def command_handler(self, message: Message) -> None:
         # message.bytes_message = b'command_type ...'
@@ -67,7 +76,7 @@ class Client:
         elif command == WRONG_PASSWORD:
             print("Неверный пароль")
         elif command == USER_NOT_EXIST:
-            print("Пользователя с таким логином не найдено")
+            print("Пользователь не найден")
         elif command == USER_FOUND:
             # message.bytes_message = b'... uid login'
             self.friendly_users[data[1]] = data[2]
@@ -77,51 +86,83 @@ class Client:
         print("received from:\n", message.sender_id,
               "\nmessage:\n", get_decoded_data(message.bytes_message), sep="")
 
+    def get_id_by_login(self) -> None:
+        login = input("Введите логин\n")
+        if not login:
+            return
+        message = Message(message_type=COMMAND)
+        message.bytes_message = get_bytes_string(str(GET_USER_ID_BY_LOGIN) + " " + login)
+        send_message_to_client(self.server, message)
+
+    def authentication(self, auth_type: int) -> None:
+        message = Message(message_type=COMMAND)
+        login = input("Введите логин\n")
+        password = input("Введите пароль\n")
+        if not login or not password:
+            return
+        message.bytes_message = get_bytes_string(str(auth_type) + " " + login + " " + password)
+        send_message_to_client(self.server, message)
+
+    def delete_account(self) -> None:
+        message = Message(message_type=COMMAND)
+        message.bytes_message = get_bytes_string(str(DELETE_USER))
+        send_message_to_client(self.server, message)
+        self.id = 0
+        print("Пользователь удален")
+
+    def log_out(self) -> None:
+        message = Message(message_type=COMMAND)
+        message.bytes_message = get_bytes_string(str(LOG_OUT))
+        send_message_to_client(self.server, message)
+        self.id = 0
+        print("Вы вышли из системы, войдите или зарегистрируйтесь для продолжения")
+
+    def get_user_message(self) -> None:
+        if not self.id:
+            print("Невозможно отправить сообщение. Сперва необходимо войти или зарегистрироваться")
+            return
+        sender_id = self.id
+        receiver_id = ""
+        while not receiver_id.isdigit():
+            receiver_id = input("Введите id получателя:\n")
+        receiver_id = int(receiver_id)
+        message = Message(message_type=MESSAGE, bytes_message=get_bytes_string(input("Введите сообщение:\n")),
+                          receiver_id=receiver_id, sender_id=sender_id)
+        send_message_to_client(self.server, message)
+
+    def get_user_command(self) -> None:
+        user_input = input("Введите тип команды\n")
+        if not user_input:
+            return
+        message_type = int(user_input)
+        if message_type == REGISTER_USER or message_type == AUTHENTICATE_USER:
+            self.authentication(message_type)
+        elif message_type == DELETE_USER:
+            self.delete_account()
+        elif message_type == GET_USER_ID_BY_LOGIN:
+            self.get_id_by_login()
+        elif message_type == LOG_OUT:
+            self.log_out()
+        else:
+            pass
+
     def user_handler(self) -> None:
         print("Список команд для сервера:\n",
               REGISTER_USER, " - Регистрация {login, password}\n",
               AUTHENTICATE_USER, " - Вход {login, password}\n",
               DELETE_USER, " - Удалить аккаунт\n",
               GET_USER_ID_BY_LOGIN, " - Найти пользователя\n",
+              LOG_OUT, " - Выход\n",
               sep="")
         while True:
-            user_input = input("Введите id пользователя, для отправки сообщения(0 - команда серверу)\n")
-            if not user_input:
+            user_input = input("Введите тип команды (0 - команда серверу, иначе сообщение человеку)\n")
+            if not user_input or not user_input.isdigit():
                 continue
-            message_type = int(user_input)
-            if message_type > 0:
-                if not self.id:
-                    print("Невозможно отправить сообщение. Сперва необходимо войти или зарегистрироваться")
-                    continue
-                receiver_id = message_type
-                sender_id = self.id
-                message = Message(message_type=MESSAGE, bytes_message=get_bytes_string(input("Введите сообщение:\n")),
-                                  receiver_id=receiver_id, sender_id=sender_id)
+            user_input = int(user_input)
+            if user_input > 0:
+                self.get_user_message()
             else:
-                user_input = input("Введите тип команды\n")
-                if not user_input:
-                    continue
-                message_type = int(user_input)
-                message = Message(message_type=COMMAND)
-                if message_type == REGISTER_USER or message_type == AUTHENTICATE_USER:
-                    login = input("Введите логин\n")
-                    password = input("Введите пароль\n")
-                    if not login or not password:
-                        continue
-                    message.bytes_message = get_bytes_string(str(message_type) + " " + login + " " + password)
-                elif message_type == DELETE_USER:
-                    message.bytes_message = get_bytes_string(str(message_type))
-                elif message_type == GET_USER_ID_BY_LOGIN:
-                    login = input("Введите логин\n")
-                    if not login:
-                        continue
-                    message.bytes_message = get_bytes_string(str(message_type) + " " + login)
-                else:
-                    pass
-            send_message_to_client(self.server, *get_prepared_message(message))
-
-    def find_user_by_login(self, login: str) -> int:
-        pass
+                self.get_user_command()
 
 
 def main():
