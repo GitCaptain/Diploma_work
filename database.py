@@ -42,9 +42,9 @@ class Database:
                             {"login": login})
         query_result = self.cursor.fetchone()
         if not query_result:  # пользователя не существует
-            return WRONG_LOGIN
+            return DB_WRONG_LOGIN
         elif hashed_password != query_result[1] and not pre_registration_check:
-            return WRONG_PASSWORD  # неверный пароль
+            return DB_WRONG_PASSWORD  # неверный пароль
         else:
             return query_result[0]  # возвращаем uid пользователя
 
@@ -57,8 +57,8 @@ class Database:
     def add_user(self, login: str, hashed_password: str) -> int:
         # !!! ТОЛЬКО ОДИН ПОЛЬЗОВАТЕЛЬ МОЖЕТ РЕГИСТРИРОВАТЬСЯ, ОДНОВРЕМЕННО НЕСКОЛЬКИМ НЕЛЬЗЯ, Т.К. ЭТО СЛОМАЕТ
         # max_user_id И ТОГДА ГГ БАЗЕ ДАННЫХ (ВОЗМОЖНО СЛЕДУЕТ ПРИДУМАТЬ ДРУГОЙ СПОСОБ РЕГИСТРАЦИИ)
-        if self.check_person(login, hashed_password, pre_registration_check=True) > 0:  # пользователь уже существует
-            return USER_ALREADY_EXIST
+        if self.check_person(login, hashed_password, pre_registration_check=True) != DB_WRONG_LOGIN:  # пользователь уже существует
+            return DB_USER_ALREADY_EXIST
         self.max_user_id += 1
         self.cursor.execute("INSERT INTO user_list "
                             "VALUES(:uid, :login, :hpass);",
@@ -81,6 +81,16 @@ class Database:
 
     def __del__(self):
         self.database_connection.close()
+
+    def get_id_by_login(self, login) -> int:
+        self.cursor.execute("SELECT uid "
+                            "FROM user_list "
+                            "WHERE login=:login;",
+                            {"login": login})
+        uid = self.cursor.fetchone()
+        if uid:
+            return uid[0]
+        return DB_USER_NOT_EXIST
 
     def clean(self):
         # НЕ ИСПОЛЬЗОВАТЬ!!! ИЛИ ПОДУМАТЬ ПРЕЖДЕ ЧЕМ ИСПОЛЬЗОВАТЬ, ФУНКЦИЮ ПИСАЛ ТОЛЬКО ДЛЯ ТОГО, ЧТОБ ПОТЕСТИТЬ

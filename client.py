@@ -47,25 +47,31 @@ class Client:
     def command_handler(self, message: Message) -> None:
         # message.bytes_message = b'command_type ...'
         data = get_decoded_data(message.bytes_message).split()
-        data[0] = int(data[0])
-        if data[0] == REGISTRATION_SUCCESS:  # переработать (логин может быть занят), вынести в отдельную функцию
+        command = int(data[0])
+        if command == REGISTRATION_SUCCESS:  # переработать (логин может быть занят), вынести в отдельную функцию
             # message.bytes_message  = b'... uid'
             uid = int(data[1])
             self.id = uid
             print("Вы успешно зарегистрированы, id:", uid)
-        elif data[0] == AUTHENTICATION_SUCCESS:
+        elif command == AUTHENTICATION_SUCCESS:
             # message.bytes_message  = b'... uid'
             uid = int(data[1])
             self.id = uid
             print("Вход в систему успешно выполнен, id:", uid)
-        elif data[0] == USER_ALREADY_EXIST:  # переработать, вынести в отдельную функцию
+        elif command == USER_ALREADY_EXIST:  # переработать, вынести в отдельную функцию
             print("Пользователь с таким логином уже существует")
-        elif data[0] == NOT_AUTHENTICATED:
+        elif command == NOT_AUTHENTICATED:
             print("Невозможно выполнить запрос, сперва необходимо зарегистрироваться или войти")
-        elif data[0] == WRONG_LOGIN:
+        elif command == WRONG_LOGIN:
             print("Пользователя с таким логином не существует")
-        elif data[0] == WRONG_PASSWORD:
+        elif command == WRONG_PASSWORD:
             print("Неверный пароль")
+        elif command == USER_NOT_EXIST:
+            print("Пользователя с таким логином не найдено")
+        elif command == USER_FOUND:
+            # message.bytes_message = b'... uid login'
+            self.friendly_users[data[1]] = data[2]
+            print("Пользователь найден, uid:", data[1])
 
     def message_handler(self, message: Message) -> None:
         print("received from:\n", message.sender_id,
@@ -75,7 +81,9 @@ class Client:
         print("Список команд для сервера:\n",
               REGISTER_USER, " - Регистрация {login, password}\n",
               AUTHENTICATE_USER, " - Вход {login, password}\n",
-              DELETE_USER, " - Удалить аккаунт\n", sep="")
+              DELETE_USER, " - Удалить аккаунт\n",
+              GET_USER_ID_BY_LOGIN, " - Найти пользователя\n",
+              sep="")
         while True:
             user_input = input("Введите id пользователя, для отправки сообщения(0 - команда серверу)\n")
             if not user_input:
@@ -98,10 +106,22 @@ class Client:
                 if message_type == REGISTER_USER or message_type == AUTHENTICATE_USER:
                     login = input("Введите логин\n")
                     password = input("Введите пароль\n")
+                    if not login or not password:
+                        continue
                     message.bytes_message = get_bytes_string(str(message_type) + " " + login + " " + password)
                 elif message_type == DELETE_USER:
                     message.bytes_message = get_bytes_string(str(message_type))
+                elif message_type == GET_USER_ID_BY_LOGIN:
+                    login = input("Введите логин\n")
+                    if not login:
+                        continue
+                    message.bytes_message = get_bytes_string(str(message_type) + " " + login)
+                else:
+                    pass
             send_message_to_client(self.server, *get_prepared_message(message))
+
+    def find_user_by_login(self, login: str) -> int:
+        pass
 
 
 def main():
