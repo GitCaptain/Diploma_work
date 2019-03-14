@@ -20,6 +20,9 @@ class Client:
         self.friendly_users = dict()  # id: User
         self.id = 0  # не аутентифицирован
 
+    def relogin(self):
+        pass
+
     def run(self) -> None:
         server_handler_thread = threading.Thread(target=self.server_handler)
         server_handler_thread.start()

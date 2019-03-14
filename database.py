@@ -125,10 +125,11 @@ class Database:
                             "WHERE receiver_id=:receiver_id;",
                             {"receiver_id": receiver_id})
         data = self.cursor.fetchall()
-        self.cursor.execute("DELETE * "
+        self.cursor.execute("DELETE "
                             "FROM pending_messages "
                             "WHERE receiver_id=:receiver_id;",
                             {"receiver_id": receiver_id})
+        self.database_connection.commit()
         return data
 
     def clean(self):
