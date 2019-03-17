@@ -4,7 +4,7 @@ from constants import MESSAGE_SIZE, ENCODING
 
 class User:
     # Структура, содержащая данные о клиенте
-    def __init__(self, socket: 'socket.socket', client_id: int = 0, address: str = ''):
+    def __init__(self, socket: 'socket.socket', client_id: int = 0, address: 'tuple(str, int)' = None):
         self.socket = socket
         self.id = client_id
         self.address = address
@@ -77,5 +77,6 @@ def get_bytes_string(string: str) -> bytes:
     return bytes(string, ENCODING)
 
 
-def get_decoded_data(data: bytes) -> str:
+def get_text_from_bytes_data(data: bytes) -> str:
     return data.decode(ENCODING)
+
