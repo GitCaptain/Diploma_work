@@ -1,10 +1,10 @@
-from constants import *
 from common_functions_and_data_structures import *
 from database import Database
 import socket
 import ssl
 import threading  # заменить на настоящуюю многопоточность
 import traceback
+
 
 class Server:
 
@@ -28,7 +28,7 @@ class Server:
         Database(need_server_init=True)
 
     def process_command(self, user: User, message: Message) -> bool:  # разнести все по функциям
-        # message.message = b'command_type ...'
+        # message.message = 'command_type ...'
         data = message.message.split()
         command = int(data[0])
         if not self.thread_locals.user_authenticated and command != LOG_IN and command != REGISTER_USER:
@@ -36,7 +36,7 @@ class Server:
             send_message_to_client(user, message)
             return False
         if command == REGISTER_USER:
-            # message.message  = b'... login password'
+            # data  = [..., 'login', 'password']
             if not self.client_registration(user, data[1], data[2]):
                 return False
             return True
@@ -49,12 +49,12 @@ class Server:
             user.id = 0
             return True
         elif command == LOG_IN:
-            # message.message  = b'... login password'
+            # data = [..., 'login', 'password']
             if not self.client_authentication(user, data[1], data[2]):
                 return False
             return True
         elif command == GET_USER_ID_BY_LOGIN:  # переработать, вынести в отдельную функцию
-            # message.message = b'... login'
+            # data = [..., 'login']
             login = data[1]
             uid = self.thread_locals.database.get_id_by_login(login)
             message = Message(message_type=COMMAND)
@@ -77,26 +77,30 @@ class Server:
                 message.sender_id = sender_id
                 message.message = pending_message
                 send_message_to_client(user, message)
-        elif command == CREATE_P2P_CONNECTION:
-            # message.message = b'... uid'
+        elif command == CREATE_P2P_CONNECTION or command == P2P_CONNECTION_DATA:
+            # data = [..., 'uid', 'con_type', 'private_ip', 'private_port']
             second_peer_id = int(data[1])
             message = Message(message_type=COMMAND, receiver_id=user.id)
             if second_peer_id not in self.authenticated_users:
-                message.message = str(USER_OFFLINE)
+                message.message = str(P2P_USER_OFFLINE)
                 send_message_to_client(user, message)
                 return False
             second_peer = self.authenticated_users[second_peer_id]
+            user_private_address = data[3], int(data[4])
 
-            message.message = "{} {} {} {}".format(P2P_CONNECTION_DATA, second_peer_id, *second_peer.address)
-            send_message_to_client(user, message)
+            if command == CREATE_P2P_CONNECTION:
+                command_to_peer = P2P_ACCEPT_CONNECTION
+            else:
+                command_to_peer = P2P_CONNECTION_DATA
 
             message = Message(message_type=COMMAND, receiver_id=second_peer.id)
-            message.message = "{} {} {} {}".format(P2P_ACCEPT_CONNECTION, user.id, *user.address)
+            message.message = "{} {} {} {} {} {} {}".format(command_to_peer, user.id, int(data[2]),
+                                                            *user_private_address, *user.public_address)
             send_message_to_client(second_peer, message)
         else:
             pass
 
-    def client_registration(self, user: User, login, password) -> bool:
+    def client_registration(self, user: User, login: str, password: str) -> bool:
         uid = self.thread_locals.database.add_user(login, get_hash(password))
 
         response_message = Message(message_type=COMMAND, sender_id=self.id)
@@ -111,7 +115,7 @@ class Server:
         send_message_to_client(user, response_message)
         return True
 
-    def client_authentication(self, user: User, login, password) -> bool:
+    def client_authentication(self, user: User, login: str, password: str) -> bool:
         # secure_context = ssl.create_default_context()  # возможно нужен не дефолтный контекст, почитать
         # ssl_client = secure_context.wrap_socket(client, server_side=True)
         uid = self.thread_locals.database.check_person(login, get_hash(password))
@@ -171,7 +175,7 @@ class Server:
             user.socket.close()
             if user.id:
                 self.authenticated_users.pop(user.id)
-            print("disconnected: {}".format(user.address))
+            print("disconnected: {}".format(user.public_address))
 
     def stop_client_handling(self):
         pass
@@ -208,7 +212,7 @@ class Server:
         while True:
             connected_socket, connected_addres = self.server_socket.accept()
             print("connected:", connected_addres)
-            user = User(socket=connected_socket, address=connected_addres)
+            user = User(socket=connected_socket, public_address=connected_addres)
             process_user_thread = threading.Thread(target=self.process_client, args=(user,))
             process_user_thread.start()
 

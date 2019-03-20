@@ -1,13 +1,13 @@
 import hashlib
-from constants import MESSAGE_SIZE, ENCODING
+from constants import *
 
 
 class User:
     # Структура, содержащая данные о клиенте
-    def __init__(self, socket: 'socket.socket', client_id: int = 0, address: 'tuple(str, int)' = None):
+    def __init__(self, socket: 'socket.socket', client_id: int = 0, public_address: 'tuple(str, int)' = None):
         self.socket = socket
         self.id = client_id
-        self.address = address
+        self.public_address = public_address
 
 
 class Message:
@@ -33,13 +33,11 @@ def get_message_from_client(user: User) -> Message:
     if not message_data:  # Клиент отключился
         return Message()
     message_data = message_data.split()
-    b_message = b""
 
+    b_message = b""
     # Вместе с данными о сообщении успело придти и само сообщение и мы получили как минимум его начало, отделенное " "
     # Если получили еще и данные о следующем сообщении, то пока что хз, что с этим делать
-    for part in message_data[4:]:
-        if not part.isdigit():
-            b_message += part
+    b_message = b_message.join(message_data[MESSAGE_DATA_ITEMS_COUNT:])
 
     message_type = int(message_data[0])
     length = int(message_data[1])

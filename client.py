@@ -1,11 +1,10 @@
-from constants import *
 import socket
 import threading
-from sys import argv
 import ssl
 from cryptography.fernet import Fernet  # Заменить
 from common_functions_and_data_structures import *
 import traceback
+import sys
 
 
 def get_input() -> str:
@@ -13,18 +12,40 @@ def get_input() -> str:
 
 
 class Friend(User):
-    def __init__(self, socket: 'socket.socket' = None, client_id: int = 0, address: 'tuple(str, int)' = None, login: str = ''):
-        super().__init__(socket, client_id, address)
+    def __init__(self, socket: 'socket.socket' = None, client_id: int = 0,
+                 public_address: 'tuple(str, int)' = None, private_address: 'tuple(str, int)' = None, login: str = ''):
+        super().__init__(socket, client_id, public_address)
         self.login = login
+        self.private_address = private_address
 
 
 class Client:
 
     def __init__(self, server_hostname: str = 'localhost'):
         server_socket = socket.socket(family=socket.AF_INET, type=socket.SOCK_STREAM)
+
+        self.p2p_tcp_connection_possible = True
+        try:
+            if sys.platform.startswith('linux') or sys.platform.startswith('darwin'):  # linux, Mac OS
+                server_socket.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+                server_socket.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEPORT, 1)
+
+            elif sys.platform == 'win32' or sys.platform == 'cygwin':  # windows
+                # on Windows, REUSEADDR already implies REUSEPORT
+                server_socket.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+        except:
+            self.p2p_tcp_connection_possible = False
+
         server_socket.connect((server_hostname, PORT_TO_CONNECT))
         self.private_address = server_socket.getsockname()
-        self.server = Friend(address=server_hostname, socket=server_socket, client_id=0)
+
+        if self.p2p_tcp_connection_possible:
+            self.max_queue = 5
+            self.p2p_listener = socket.socket(family=socket.AF_INET, type=socket.SOCK_STREAM)
+            self.p2p_listener.bind(self.private_address)
+            self.p2p_listener.listen(self.max_queue)
+
+        self.server = Friend(public_address=server_hostname, socket=server_socket, client_id=0)
         self.friendly_users = dict()  # id: Friend
         self.p2p_connected = dict()  # id: Friend
         self.id = 0  # не аутентифицирован
@@ -51,6 +72,7 @@ class Client:
                 else:
                     pass
         except Exception as e:
+            print("Exception: {}".format(e.args))
             print(traceback.format_exc())
             print("id:", target.id)
         finally:
@@ -63,16 +85,16 @@ class Client:
         send_message_to_client(self.server, message)
 
     def command_handler(self, message: Message) -> None:
-        # message.bytes_message = b'command_type ...'
+        # message.message = 'command_type ...'
         data = message.message.split()
         command = int(data[0])
         if command == REGISTRATION_SUCCESS:  # переработать (логин может быть занят), вынести в отдельную функцию
-            # message.bytes_message  = b'... uid'
+            # data = [.., 'uid']
             uid = int(data[1])
             self.id = uid
             print("Вы успешно зарегистрированы, id:", uid)
         elif command == AUTHENTICATION_SUCCESS:
-            # message.bytes_message  = b'... uid'
+            # data  = [.., 'uid']
             uid = int(data[1])
             self.id = uid
             print("Вход в систему успешно выполнен, id:", uid)
@@ -87,27 +109,34 @@ class Client:
         elif command == USER_NOT_EXIST:
             print("Пользователь не найден")
         elif command == USER_FOUND:
-            # message.bytes_message = b'... uid login'
+            # data = [.., 'uid', 'login']
             uid = int(data[1])
             self.friendly_users[uid] = Friend(client_id=uid, login=data[2])
             print("Пользователь найден, uid:", data[1])
-        elif command == P2P_CONNECTION_DATA:
-            print("Подключено к", data[1])
-            # message.bytes_message = b'... uid ip port'
-            friend_socket = socket.socket(family=socket.AF_INET, type=socket.SOCK_STREAM)
-            friend_id = int(data[1])
-            friend_address = data[2], int(data[3])
-            friend_socket.connect(friend_address)
-            friend = Friend(socket=friend_socket, client_id=friend_id, address=friend_address)
-            self.p2p_connected[friend_id] = friend
-            tunnel_connection_thread = threading.Thread(target=self.server_handler, args=(friend,))
-            tunnel_connection_thread.start()
-        elif command == P2P_ACCEPT_CONNECTION:
-            friend_socket, friend_address = self.server.socket.accept()
-            friend = Friend(socket=friend_socket, address=friend_address)
-            tunnel_connection_thread = threading.Thread(target=self.server_handler, args=(friend,))
-            tunnel_connection_thread.start()
-        elif command == USER_OFFLINE:
+        elif command == P2P_ACCEPT_CONNECTION or command == P2P_CONNECTION_DATA:
+            # data = [..., 'uid', 'con_type', 'private_ip', 'private_port', 'public_ip', 'public_port']
+            peer_uid = int(data[1])
+            con_type = int(data[2])
+
+            if con_type == P2P_UDP or not self.p2p_tcp_connection_possible:
+                con_type = P2P_UDP
+            else:
+                con_type = P2P_TCP
+
+            peer_priv = data[3], int(data[4])
+            peer_pub = data[5], int(data[6])
+            peer = Friend(client_id=peer_uid, public_address=peer_pub, private_address=peer_priv)
+
+            if command == P2P_ACCEPT_CONNECTION:
+                self.create_p2p_connection(int(data[1]), False)
+
+            if con_type == P2P_TCP:
+                self.begin_p2p_tcp_connection(peer)
+            elif con_type == P2P_UDP:
+                self.begin_p2p_udp_connection(peer)
+            else:
+                pass
+        elif command == P2P_USER_OFFLINE:
             print("Пользователь сейчас не в сети")
         else:
             pass
@@ -189,7 +218,8 @@ class Client:
         elif message_type == LOG_OUT:
             self.log_out()
         elif message_type == CREATE_P2P_CONNECTION:
-            self.create_p2p_connection()
+            user_id = int(input("Введите id пользователя\n"))
+            self.create_p2p_connection(user_id)
         else:
             pass
 
@@ -214,20 +244,35 @@ class Client:
             elif user_input == 2:
                 self.get_user_message(True)
 
-    def create_p2p_connection(self, user_id=None):
-        user_id = int(input("Введите id пользователя\n"))
+    def create_p2p_connection(self, user_id: int, create: bool = True):
         if user_id in self.p2p_connected:
             return
         message = Message(message_type=COMMAND, sender_id=self.id)
-        message.message = "{} {}".format(CREATE_P2P_CONNECTION, user_id)
+
+        if self.p2p_tcp_connection_possible:
+            con_type = P2P_TCP
+        else:
+            con_type = P2P_UDP
+
+        if create:
+            command = CREATE_P2P_CONNECTION
+        else:
+            command = P2P_CONNECTION_DATA
+        message.message = "{} {} {} {} {}".format(command, user_id, con_type, *self.private_address)
         send_message_to_client(self.server, message)
+
+    def begin_p2p_tcp_connection(self, peer: Friend):
+        print('tcp dont work yet')
+
+    def begin_p2p_udp_connection(self, peer: Friend):
+        print('tcp dont work yet')
 
 
 def main():
 
     address = '192.168.56.1'
-    if len(argv) > 1:
-        address = argv[1]
+    if len(sys.argv) > 1:
+        address = sys.argv[1]
 
     client = Client(address)
     client.run()
