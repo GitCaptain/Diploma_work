@@ -12,19 +12,19 @@ class User:
 
 class Message:
     # Структура содержащая данные о сообщении
-    def __init__(self, message_type: int = None, receiver_id: int = 0, sender_id: int = 0, length: int = 0, bytes_message: bytes = b""):
+    def __init__(self, message_type: int = None, receiver_id: int = 0, sender_id: int = 0, length: int = 0, message: str = ""):
         self.message_type = message_type
         self.receiver_id = receiver_id
         self.length = length
-        self.bytes_message = bytes_message
+        self.message = message
         self.sender_id = sender_id
 
     def __bool__(self):
-        return bool(self.bytes_message)
+        return bool(self.message)
 
 
 def get_hash(string: str, hash_func=hashlib.sha1) -> str:
-    return hash_func(string).hexdigest()
+    return hash_func(get_bytes_string(string)).hexdigest()
 
 
 def get_message_from_client(user: User) -> Message:
@@ -33,36 +33,43 @@ def get_message_from_client(user: User) -> Message:
     if not message_data:  # Клиент отключился
         return Message()
     message_data = message_data.split()
+    b_message = b""
+
+    # Вместе с данными о сообщении успело придти и само сообщение и мы получили как минимум его начало, отделенное " "
+    # Если получили еще и данные о следующем сообщении, то пока что хз, что с этим делать
+    for part in message_data[4:]:
+        if not part.isdigit():
+            b_message += part
+
     message_type = int(message_data[0])
     length = int(message_data[1])
     receiver_id = int(message_data[2])
     sender_id = int(message_data[3])
-    b_message = b""
+
     while len(b_message) < length:
         # Нужно получить не больше чем осталось от сообщения, иначе можно получить начало следующего
         message_part = user.socket.recv(min(MESSAGE_SIZE, length - len(b_message)))
         if not message_part:  # Клиент отключился
-            b_message = None
+            b_message = b""
             break
         b_message += message_part
     message = Message(message_type=message_type,
                       receiver_id=receiver_id,
                       sender_id=sender_id,
                       length=length,
-                      bytes_message=b_message
+                      message=get_text_from_bytes_data(b_message)
                       )
     return message
 
 
 def get_prepared_message(message: Message) -> (bytes, bytes):
-    message.length = len(message.bytes_message)
-
+    message.message = " " + message.message
+    message.length = len(message.message)
     message_data = bytes("{message_type} {length} {receiver_id} {sender_id}".format(
                     message_type=message.message_type, length=message.length, receiver_id=message.receiver_id,
                     sender_id=message.sender_id
                     ), ENCODING)
-
-    return message_data, message.bytes_message
+    return message_data, get_bytes_string(message.message)
 
 
 def send_message_to_client(receiver: User, message: Message) -> None:
@@ -79,4 +86,3 @@ def get_bytes_string(string: str) -> bytes:
 
 def get_text_from_bytes_data(data: bytes) -> str:
     return data.decode(ENCODING)
-

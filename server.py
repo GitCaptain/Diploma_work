@@ -4,7 +4,7 @@ from database import Database
 import socket
 import ssl
 import threading  # заменить на настоящуюю многопоточность
-
+import traceback
 
 class Server:
 
@@ -17,7 +17,7 @@ class Server:
 
     def __init__(self):
         # создаем сокет, работающий по протоколу TCP
-        self.server_socket = socket.socket()
+        self.server_socket = socket.socket(family=socket.AF_INET, type=socket.SOCK_STREAM)
         # (хост, порт) = хост - машина которую мы слушаем, если не указана, то принимаются связи от всех машин,
         # порт - номер порта который принимает соединение
         self.server_socket.bind((self.host, PORT_TO_CONNECT))
@@ -28,16 +28,16 @@ class Server:
         Database(need_server_init=True)
 
     def process_command(self, user: User, message: Message) -> bool:  # разнести все по функциям
-        # message.bytes_message = b'command_type ...'
-        data = message.bytes_message.split()
+        # message.message = b'command_type ...'
+        data = message.message.split()
         command = int(data[0])
         if not self.thread_locals.user_authenticated and command != LOG_IN and command != REGISTER_USER:
-            message = Message(message_type=COMMAND, bytes_message=get_bytes_string(str(NOT_AUTHENTICATED)))
+            message = Message(message_type=COMMAND, message=str(NOT_AUTHENTICATED))
             send_message_to_client(user, message)
             return False
         if command == REGISTER_USER:
-            # message.bytes_message  = b'... login password'
-            if not self.client_registration(user, data[1].decode(ENCODING), data[2]):
+            # message.message  = b'... login password'
+            if not self.client_registration(user, data[1], data[2]):
                 return False
             return True
         elif command == DELETE_USER:  # переработать, вынести в отдельную функцию
@@ -49,19 +49,19 @@ class Server:
             user.id = 0
             return True
         elif command == LOG_IN:
-            # message.bytes_message  = b'... login password'
-            if not self.client_authentication(user, data[1].decode(ENCODING), data[2]):
+            # message.message  = b'... login password'
+            if not self.client_authentication(user, data[1], data[2]):
                 return False
             return True
         elif command == GET_USER_ID_BY_LOGIN:  # переработать, вынести в отдельную функцию
-            # message.bytes_message = b'... login'
-            login = get_text_from_bytes_data(data[1])
+            # message.message = b'... login'
+            login = data[1]
             uid = self.thread_locals.database.get_id_by_login(login)
             message = Message(message_type=COMMAND)
             if uid == DB_USER_NOT_EXIST:
-                message.bytes_message = get_bytes_string(str(USER_NOT_EXIST))
+                message.message = str(USER_NOT_EXIST)
             else:
-                message.bytes_message = get_bytes_string(str(USER_FOUND) + " " + str(uid) + " " + login)
+                message.message = "{} {} {}".format(USER_FOUND, uid, login)
             send_message_to_client(user, message)
         elif command == LOG_OUT:  # переработать, вынести в отдельную функцию
             self.thread_locals.user_authenticated = False
@@ -73,27 +73,25 @@ class Server:
         elif command == GET_PENDING_MESSAGES:
             pendings = self.thread_locals.database.get_pending_messages(user.id)
             message = Message(message_type=MESSAGE, receiver_id=user.id)
-            for sender_id, bytes_message in pendings:
+            for sender_id, pending_message in pendings:
                 message.sender_id = sender_id
-                message.bytes_message = bytes_message
+                message.message = pending_message
                 send_message_to_client(user, message)
         elif command == CREATE_P2P_CONNECTION:
-            # message.bytes_message = b'... uid'
+            # message.message = b'... uid'
             second_peer_id = int(data[1])
             message = Message(message_type=COMMAND, receiver_id=user.id)
             if second_peer_id not in self.authenticated_users:
-                message.bytes_message = get_bytes_string(str(USER_OFFLINE))
+                message.message = str(USER_OFFLINE)
                 send_message_to_client(user, message)
                 return False
             second_peer = self.authenticated_users[second_peer_id]
 
-            message.bytes_message = get_bytes_string("{} {} {} {}".format(P2P_CONNECTION_DATA, second_peer_id,
-                                                                          *second_peer.address))
+            message.message = "{} {} {} {}".format(P2P_CONNECTION_DATA, second_peer_id, *second_peer.address)
             send_message_to_client(user, message)
 
             message = Message(message_type=COMMAND, receiver_id=second_peer.id)
-            message.bytes_message = get_bytes_string("{} {} {} {}".format(P2P_ACCEPT_CONNECTION, user.id,
-                                                                          *user.address))
+            message.message = "{} {} {} {}".format(P2P_ACCEPT_CONNECTION, user.id, *user.address)
             send_message_to_client(second_peer, message)
         else:
             pass
@@ -103,13 +101,13 @@ class Server:
 
         response_message = Message(message_type=COMMAND, sender_id=self.id)
         if uid == DB_USER_ALREADY_EXIST:
-            response_message.bytes_message = get_bytes_string(str(USER_ALREADY_EXIST))
+            response_message.message = str(USER_ALREADY_EXIST)
             send_message_to_client(user, response_message)
             return False
         user.id = uid
         self.thread_locals.user_authenticated = True
         self.authenticated_users[user.id] = user
-        response_message.bytes_message = get_bytes_string(str(REGISTRATION_SUCCESS) + " " + str(uid))
+        response_message.message = "{} {}".format(REGISTRATION_SUCCESS, uid)
         send_message_to_client(user, response_message)
         return True
 
@@ -119,17 +117,17 @@ class Server:
         uid = self.thread_locals.database.check_person(login, get_hash(password))
         response_message = Message(message_type=COMMAND, sender_id=self.id)
         if uid == DB_WRONG_LOGIN:
-            response_message.bytes_message = get_bytes_string(str(WRONG_LOGIN))
+            response_message.message = str(WRONG_LOGIN)
             send_message_to_client(user, response_message)
             return False
         elif uid == DB_WRONG_PASSWORD:
-            response_message.bytes_message = get_bytes_string(str(WRONG_PASSWORD))
+            response_message.message = str(WRONG_PASSWORD)
             send_message_to_client(user, response_message)
             return False
         user.id = uid
         self.thread_locals.user_authenticated = True
         self.authenticated_users[user.id] = user
-        response_message.bytes_message = get_bytes_string(str(AUTHENTICATION_SUCCESS) + " " + str(uid))
+        response_message.message = "{} {}".format(AUTHENTICATION_SUCCESS, uid)
         send_message_to_client(user, response_message)
         return True
 
@@ -140,13 +138,13 @@ class Server:
         elif self.thread_locals.database.check_if_user_exist(user_id=message.receiver_id):
             self.thread_locals.database.add_pending_message(sender_id=message.sender_id,
                                                             receiver_id=message.receiver_id,
-                                                            bytes_message=message.bytes_message)
+                                                            message=message.message)
         else:
             receiver = self.authenticated_users[message.sender_id]
             message.receiver_id = message.sender_id
             message.sender_id = 0
             message.message_type = COMMAND
-            message.bytes_message = get_bytes_string(str(USER_NOT_EXIST))
+            message.message = str(USER_NOT_EXIST)
             send_message_to_client(receiver, message)
 
     def process_client(self, user: User) -> None:
@@ -166,6 +164,7 @@ class Server:
                 else:
                     pass
         except Exception as e:
+            print(traceback.format_exc())
             print("Exception: {}".format(e.args))
         finally:
             user.socket.shutdown(socket.SHUT_RDWR)

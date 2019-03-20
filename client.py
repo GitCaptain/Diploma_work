@@ -5,6 +5,7 @@ from sys import argv
 import ssl
 from cryptography.fernet import Fernet  # Заменить
 from common_functions_and_data_structures import *
+import traceback
 
 
 def get_input() -> str:
@@ -20,9 +21,9 @@ class Friend(User):
 class Client:
 
     def __init__(self, server_hostname: str = 'localhost'):
-        server_socket = socket.socket()
-        # print(server_socket.getsockname())
+        server_socket = socket.socket(family=socket.AF_INET, type=socket.SOCK_STREAM)
         server_socket.connect((server_hostname, PORT_TO_CONNECT))
+        self.private_address = server_socket.getsockname()
         self.server = Friend(address=server_hostname, socket=server_socket, client_id=0)
         self.friendly_users = dict()  # id: Friend
         self.p2p_connected = dict()  # id: Friend
@@ -50,7 +51,7 @@ class Client:
                 else:
                     pass
         except Exception as e:
-            print("Exception: {}".format(e))
+            print(traceback.format_exc())
             print("id:", target.id)
         finally:
             pass
@@ -58,12 +59,12 @@ class Client:
     def get_pending_messages(self) -> None:
         while not self.id:
             pass
-        message = Message(message_type=COMMAND, bytes_message=get_bytes_string(str(GET_PENDING_MESSAGES)))
+        message = Message(message_type=COMMAND, message=str(GET_PENDING_MESSAGES))
         send_message_to_client(self.server, message)
 
     def command_handler(self, message: Message) -> None:
         # message.bytes_message = b'command_type ...'
-        data = get_text_from_bytes_data(message.bytes_message).split()
+        data = message.message.split()
         command = int(data[0])
         if command == REGISTRATION_SUCCESS:  # переработать (логин может быть занят), вынести в отдельную функцию
             # message.bytes_message  = b'... uid'
@@ -93,7 +94,7 @@ class Client:
         elif command == P2P_CONNECTION_DATA:
             print("Подключено к", data[1])
             # message.bytes_message = b'... uid ip port'
-            friend_socket = socket.socket()
+            friend_socket = socket.socket(family=socket.AF_INET, type=socket.SOCK_STREAM)
             friend_id = int(data[1])
             friend_address = data[2], int(data[3])
             friend_socket.connect(friend_address)
@@ -113,14 +114,14 @@ class Client:
 
     def message_handler(self, message: Message) -> None:
         print("received from:\n", message.sender_id,
-              "\nmessage:\n", get_text_from_bytes_data(message.bytes_message), sep="")
+              "\nmessage:\n", message.message, sep="")
 
     def get_id_by_login(self) -> None:
         login = input("Введите логин\n")
         if not login:
             return
         message = Message(message_type=COMMAND)
-        message.bytes_message = get_bytes_string(str(GET_USER_ID_BY_LOGIN) + " " + login)
+        message.message = "{} {}".format(GET_USER_ID_BY_LOGIN, login)
         send_message_to_client(self.server, message)
 
     def log_in(self, auth_type: int) -> None:
@@ -136,19 +137,19 @@ class Client:
         if not login or not password:
             return
 
-        message.bytes_message = get_bytes_string(str(auth_type) + " " + login + " " + password)
+        message.message = "{} {} {}".format(auth_type, login, password)
         send_message_to_client(self.server, message)
 
     def delete_account(self) -> None:
         message = Message(message_type=COMMAND)
-        message.bytes_message = get_bytes_string(str(DELETE_USER))
+        message.message = str(DELETE_USER)
         send_message_to_client(self.server, message)
         self.id = 0
         print("Пользователь удален")
 
     def log_out(self) -> None:
         message = Message(message_type=COMMAND)
-        message.bytes_message = get_bytes_string(str(LOG_OUT))
+        message.message = str(LOG_OUT)
         send_message_to_client(self.server, message)
         self.id = 0
         print("Вы вышли из системы, войдите или зарегистрируйтесь для продолжения")
@@ -170,7 +171,7 @@ class Client:
             else:
                 print("Подключение не установлено")
                 return
-        message = Message(message_type=MESSAGE, bytes_message=get_bytes_string(input("Введите сообщение:\n")),
+        message = Message(message_type=MESSAGE, message=input("Введите сообщение:\n"),
                           receiver_id=receiver_id, sender_id=sender_id)
         send_message_to_client(target, message)
 
@@ -213,12 +214,12 @@ class Client:
             elif user_input == 2:
                 self.get_user_message(True)
 
-    def create_p2p_connection(self, user_id = None):
+    def create_p2p_connection(self, user_id=None):
         user_id = int(input("Введите id пользователя\n"))
         if user_id in self.p2p_connected:
             return
         message = Message(message_type=COMMAND, sender_id=self.id)
-        message.bytes_message = get_bytes_string("{} {}".format(CREATE_P2P_CONNECTION, user_id))
+        message.message = "{} {}".format(CREATE_P2P_CONNECTION, user_id)
         send_message_to_client(self.server, message)
 
 

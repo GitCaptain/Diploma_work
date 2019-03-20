@@ -43,6 +43,7 @@ class AuthenticationWindow(Toplevel):
         self.focus_get()
         self.grab_set()
 
+
 class MainWindow(Frame):
 
     def __init__(self, master=None):

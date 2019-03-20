@@ -113,10 +113,10 @@ class Database:
             return uid[0]
         return DB_USER_NOT_EXIST
 
-    def add_pending_message(self, bytes_message: bytes, sender_id: int, receiver_id: int) -> None:
+    def add_pending_message(self, message: str, sender_id: int, receiver_id: int) -> None:
         self.cursor.execute("INSERT INTO pending_messages "
                             "VALUES(:receiver, :sender, :message);",
-                            {"receiver": receiver_id, "sender": sender_id, "message": bytes_message})
+                            {"receiver": receiver_id, "sender": sender_id, "message": message})
         self.database_connection.commit()
 
     def get_pending_messages(self, receiver_id: int) -> list:
