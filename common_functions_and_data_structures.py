@@ -33,7 +33,6 @@ def get_message_from_client(user: User) -> Message:
     if not message_data:  # Клиент отключился
         return Message()
     message_data = message_data.split()
-
     b_message = b""
     # Вместе с данными о сообщении успело придти и само сообщение и мы получили как минимум его начало, отделенное " "
     # Если получили еще и данные о следующем сообщении, то пока что хз, что с этим делать
