@@ -58,8 +58,8 @@ class Client:
         user_handler_thread = threading.Thread(target=self.user_handler)
         user_handler_thread.start()
 
-        peer_keep_alive_thread = threading.Thread(target=self.peer_handler)
-        peer_keep_alive_thread.start()
+        # peer_keep_alive_thread = threading.Thread(target=self.peer_handler)
+        # peer_keep_alive_thread.start()
 
     def server_handler(self, target: Friend = None) -> None:
         if not target:
@@ -339,19 +339,21 @@ class Client:
 
             if sock:
                 peer.socket = sock
-                self.lock.acquire()
+                self.lock.acquire()  # возможно это не нужно
                 self.p2p_connected[peer.id] = peer
-                mes = Message(message_type=MESSAGE, message="hello, peer!")
-                send_message_to_client(peer, mes)
                 self.lock.release()
                 connection_done = True
 
             if connection_done:  # если подключение установилось завершаем цикл
                 break
+
         if connection_done:
             print("connected", sock)
+            new_handler = threading.Thread(target=self.server_handler, args=(peer,))
+            new_handler.start()
         else:
             self.begin_p2p_udp_connection(peer)
+
 
     def begin_p2p_udp_connection(self, peer: Friend):
         print('udp dont work yet')
