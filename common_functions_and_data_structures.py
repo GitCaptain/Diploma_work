@@ -28,21 +28,30 @@ def get_hash(string: str, hash_func=hashlib.sha1) -> str:
 
 
 def get_message_from_client(user: User) -> Message:
-    # служебное сообщение, с данными о клиентсвом сообщении, должно умещаться в один mes_size
-    message_data = user.socket.recv(MESSAGE_SIZE)  # message_data = b'MESS_TYPE length receiver_id sender_id'
+
+    # служебное сообщение, с данными о клиентсвом сообщении
+    # message_data = b'MESS_TYPE length receiver_id sender_id'
+    message_data = b""
+    while True:
+        part = user.socket.recv(MESSAGE_DATA_SIZE)
+        if not part:
+            message_data = b""
+            break
+        message_data += part[:-1]
+        if int(part[-1]) == 48:  # ord('0') = 48
+            break
+
     if not message_data:  # Клиент отключился
         return Message()
+
     message_data = message_data.split()
-    b_message = b""
-    # Вместе с данными о сообщении успело придти и само сообщение и мы получили как минимум его начало, отделенное " "
-    # Если получили еще и данные о следующем сообщении, то пока что хз, что с этим делать
-    b_message = b_message.join(message_data[MESSAGE_DATA_ITEMS_COUNT:])
 
     message_type = int(message_data[0])
     length = int(message_data[1])
     receiver_id = int(message_data[2])
     sender_id = int(message_data[3])
 
+    b_message = b""
     while len(b_message) < length:
         # Нужно получить не больше чем осталось от сообщения, иначе можно получить начало следующего
         message_part = user.socket.recv(min(MESSAGE_SIZE, length - len(b_message)))
@@ -50,6 +59,7 @@ def get_message_from_client(user: User) -> Message:
             b_message = b""
             break
         b_message += message_part
+
     message = Message(message_type=message_type,
                       receiver_id=receiver_id,
                       sender_id=sender_id,
@@ -60,20 +70,38 @@ def get_message_from_client(user: User) -> Message:
 
 
 def get_prepared_message(message: Message) -> (bytes, bytes):
-    message.message = " " + message.message
+    message.message = get_bytes_string(message.message)
     message.length = len(message.message)
-    message_data = bytes("{message_type} {length} {receiver_id} {sender_id}".format(
+    message_data_str = "{message_type} {length} {receiver_id} {sender_id}".format(
                     message_type=message.message_type, length=message.length, receiver_id=message.receiver_id,
-                    sender_id=message.sender_id
-                    ), ENCODING)
-    return message_data, get_bytes_string(message.message)
+                    sender_id=message.sender_id)
+
+    step = MESSAGE_DATA_SIZE-1
+    message_data = []
+
+    # чтобы избежать ситуации когда мы получаем вместе с данными о сообщение и его само и возможно еще и часть
+    # следующих данных и т.д. данные о сообщении будут передаваться порциями по MESSAGE_DATA_SIZE символов,
+    # последний символ которых равен 1, если еще есть данные об этом сообщении и 0 иначе.
+    message_data_str += " " * (step - (len(message_data_str) % step))
+    cnt = len(message_data_str) // step
+    for i in range(cnt):
+        part = message_data_str[i*step:(i+1)*step] + "1"
+        message_data.append(part)
+
+    message_data[-1] = message_data[-1][:-1] + "0"
+
+    for i, part in enumerate(message_data):
+        message_data[i] = get_bytes_string(part)
+
+    return message_data, message.message
 
 
 def send_message_to_client(receiver: User, message: Message) -> None:
     message_data, message = get_prepared_message(message)
     if not receiver.socket or not message_data:
         return
-    receiver.socket.sendall(message_data)
+    for data_part in message_data:
+        receiver.socket.sendall(data_part)
     receiver.socket.sendall(message)
 
 
@@ -83,3 +111,10 @@ def get_bytes_string(string: str) -> bytes:
 
 def get_text_from_bytes_data(data: bytes) -> str:
     return data.decode(ENCODING)
+
+
+if __name__ == '__main__':
+    d, _ = get_prepared_message(Message(message="123", message_type="test" * 20))
+    print(*map(len, d))
+    print(d)
+

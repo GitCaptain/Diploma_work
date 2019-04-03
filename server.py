@@ -77,26 +77,29 @@ class Server:
                 message.sender_id = sender_id
                 message.message = pending_message
                 send_message_to_client(user, message)
-        elif command == CREATE_P2P_CONNECTION or command == P2P_CONNECTION_DATA:
-            # data = [..., 'uid', 'con_type', 'private_ip', 'private_port']
-            second_peer_id = int(data[1])
+        elif command == CREATE_P2P_CONNECTION:
+            # data = [..., 'P2P_CONNECTION_TYPE', 'peer_id','con_type'] or
+            # data = [..., 'P2P_ADDRESS', 'peer_id', 'private_ip', 'private_port']
+            command_type = int(data[1])
+            second_peer_id = int(data[2])
             message = Message(message_type=COMMAND, receiver_id=user.id)
             if second_peer_id not in self.authenticated_users:
                 message.message = str(P2P_USER_OFFLINE)
                 send_message_to_client(user, message)
                 return False
             second_peer = self.authenticated_users[second_peer_id]
-            user_private_address = data[3], int(data[4])
-
-            if command == CREATE_P2P_CONNECTION:
-                command_to_peer = P2P_ACCEPT_CONNECTION
-            else:
-                command_to_peer = P2P_CONNECTION_DATA
 
             message = Message(message_type=COMMAND, receiver_id=second_peer.id)
-            message.message = "{} {} {} {} {} {} {}".format(command_to_peer, user.id, int(data[2]),
-                                                            *user_private_address, *user.public_address)
+            command_to_peer = P2P_CONNECTION_DATA
+            if command_type == P2P_ADDRESS:
+                user_private_address = data[3], int(data[4])
+                message.message = "{} {} {} {} {} {} {}".format(command_to_peer, command_type, user.id,
+                                                                *user.public_address, *user_private_address)
+            elif command_type == P2P_CONNECTION_TYPE:
+                message.message = "{} {} {} {}".format(command_to_peer, command_type, user.id, data[3])
+
             send_message_to_client(second_peer, message)
+
         else:
             pass
 
