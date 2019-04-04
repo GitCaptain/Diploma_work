@@ -17,7 +17,7 @@ def connect_to_address(socket_connector, address):
     connected = True
     try:
         socket_connector.connect(address)
-    except ConnectionRefusedError:
+    except ConnectionRefusedError or ConnectionAbortedError:
         connected = False
     return connected
 
@@ -370,14 +370,12 @@ class Peer2PeerConnector:
         self.connection_data_stated = True
 
     def start_tcp_connection(self):
-
         public_connector = socket.socket(family=socket.AF_INET, type=socket.SOCK_STREAM)
         private_connector = socket.socket(family=socket.AF_INET, type=socket.SOCK_STREAM)
         peer_public_address = self.peer_data[2]
         peer_private_address = self.peer_data[3]
         peer_accepted = False
         connection_done = False
-
         selector = selectors.DefaultSelector()
         selector.register(self.client.p2p_tcp_listener, selectors.EVENT_READ)
 
@@ -386,17 +384,25 @@ class Peer2PeerConnector:
         while connection_attempts < self.max_connection_attempts:
             connection_attempts += 1
 
-            connected_to_peer_public_address = connect_to_address(public_connector, peer_public_address)
             connected_to_peer_private_address = connect_to_address(private_connector, peer_private_address)
+            connected_to_peer_public_address = connect_to_address(public_connector, peer_public_address)
 
             listener = selector.select(timeout=1)  # wait 1 sec at most
 
             if listener:  # Входящее соединение
                 # listener = [(), ..]
                 listener = listener[0][0].fileobj  # self.p2p_listener
-                peer_socket, _ = listener.accept()
+                peer_socket, peer_address = listener.accept()
                 peer_accepted = True
                 # handshake()
+
+            if peer_accepted:
+                # нужно проверить какой адрес мы приняли публичный или приватный и отбросить второй, на случай,
+                # если оба пользователя в одной локальной сети и были подключены оба адресса (но принят то только один)
+                if connected_to_peer_private_address and peer_address == peer_private_address:
+                    connected_to_peer_public_address = False
+                elif connected_to_peer_public_address and peer_address == peer_public_address:
+                    connected_to_peer_private_address = False
 
             if connected_to_peer_private_address:
                 # handshake()
