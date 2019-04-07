@@ -1,12 +1,13 @@
-import socket
 import threading
-import ssl
-from cryptography.fernet import Fernet  # Заменить
 from common_functions_and_data_structures import *
 import traceback
 import sys
 import time
 import selectors
+from Crypto.Cipher import AES
+from Crypto.Random import get_random_bytes
+import ssl
+
 
 
 def get_input(prompt_str: str) -> str:
@@ -23,22 +24,24 @@ def connect_to_address(socket_connector, address):
 
 
 class Friend(User):
-    def __init__(self, socket: 'socket.socket' = None, client_id: int = 0,
-                 public_address: 'tuple(str, int)' = None, private_address: 'tuple(str, int)' = None, login: str = ''):
-        super().__init__(socket, client_id, public_address)
+    def __init__(self, sock: socket.socket = None, client_id: int = 0, public_address: 'tuple(str, int)' = None,
+                 private_address: 'tuple(str, int)' = None, login: str = '', symmetric_key: bytes = None,
+                 public_asymmetric_key: bytes = None, private_key: bytes = None):
+        super().__init__(sock=sock, client_id=client_id, public_address=public_address, symmetric_key=symmetric_key)
         self.login = login
         self.private_address = private_address
-
+        self.public_asymmetric_key = public_asymmetric_key
 
 class Client:
 
     def __init__(self, server_hostname: str = 'localhost'):
 
+        secure_server_tcp_socket = self.connect_to_server((server_hostname, PORT_TO_CONNECT))
         # основной сокет для работы с сервером
-        server_tcp_socket = self.connect_to_server((server_hostname, PORT_TO_CONNECT))
+        server_tcp_socket, server_symmetric_key = self.authenticate_server(secure_server_tcp_socket)
 
         # сокет для UDP подключений от других клиентов, в случае если не удается установить TCP соединение
-        self.udp_socket = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+        # self.udp_socket = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
 
         self.p2p_tcp_connection_possible = True
         try:
@@ -59,7 +62,8 @@ class Client:
             self.p2p_tcp_listener.bind(self.private_tcp_address)
             self.p2p_tcp_listener.listen(self.max_queue)
 
-        self.server = Friend(public_address=server_hostname, socket=server_tcp_socket, client_id=0)
+        self.server = Friend(public_address=server_hostname, sock=server_tcp_socket, client_id=0,
+                             symmetric_key=server_symmetric_key)
         self.friendly_users = dict()  # id: Friend
         self.p2p_connected = dict()  # id: Friend
         self.id = 0  # не аутентифицирован
@@ -73,16 +77,21 @@ class Client:
         user_handler_thread = threading.Thread(target=self.user_handler)
         user_handler_thread.start()
 
-        # peer_keep_alive_thread = threading.Thread(target=self.peer_handler)
-        # peer_keep_alive_thread.start()
-
-    def connect_to_server(self, server_address):
+    def connect_to_server(self, server_address: '(str, int)') -> socket:
+        secure_context = ssl.create_default_context(cafile='secure/CAcert.pem')
         server_socket = socket.socket(family=socket.AF_INET, type=socket.SOCK_STREAM)
-        while not connect_to_address(server_socket, server_address):
+        secure_server_socket = secure_context.wrap_socket(server_socket)
+        while not connect_to_address(secure_server_socket, server_address):
             print("подключение не удалось")
             time.sleep(3)  # Ждем, несколько секунд, прежде чем подключиться снова
         print("Подключено")
-        return server_socket
+        return secure_server_socket
+
+    def authenticate_server(self, secure_socket: socket) -> '(socket, str)':
+        # server = User(sock=secure_socket)
+        # send_message_to_client(server, message=Message(message_type=COMMAND, message=str(AUTHENTICATE_USER)))
+        symmetric_key = get_message_from_client(User(sock=secure_socket)).message
+        return secure_socket.unwrap(), symmetric_key
 
     def server_handler(self, target: Friend = None) -> None:
         if not target:
@@ -210,7 +219,7 @@ class Client:
         self.id = 0
         print("Вы вышли из системы, войдите или зарегистрируйтесь для продолжения")
 
-    def get_user_message(self, p2p=False) -> None:
+    def get_user_message(self, p2p=False, secret=False) -> None:
         if not self.id:
             print("Невозможно отправить сообщение. Сперва необходимо войти или зарегистрироваться")
             return
@@ -260,7 +269,12 @@ class Client:
               LOG_OUT, " - Выход\n",
               sep="")
         while True:
-            user_input = get_input("Введите тип команды (0 - команда серверу, 1 - человеку, 2 - человеку напрямую)\n")
+            user_input = get_input("Введите тип команды:\n"
+                                   "0 - команда серверу,\n"
+                                   "1 - человеку,\n"
+                                   "2 - человеку напрямую\n"
+                                   "3 - шифр человеку\n"
+                                   "4 - шифр напрямую\n")
             if not user_input or not user_input.isdigit():
                 continue
             user_input = int(user_input)
@@ -269,21 +283,17 @@ class Client:
             elif user_input == 1:
                 self.get_user_message()
             elif user_input == 2:
-                self.get_user_message(True)
+                self.get_user_message(p2p=True)
+            elif user_input == 3:
+                self.get_user_message(secret=True)
+            elif user_input == 4:
+                self.get_user_message(p2p=True, secret=True)
 
     def create_p2p_connection(self, user_id: int, creator: bool = True):
         if user_id in self.p2p_connected:
             return
 
         self.connector.new_connection_task(user_id, initiator=creator)
-
-    def peer_handler(self):
-        # dont close peer connections
-        mes = Message(message_type=COMMAND, message=str(P2P_KEEP_ALIVE), sender_id=self.id)
-        while True:
-            pass
-            #for peer in self.p2p_connected.values():
-                #send_message_to_client(peer, mes)
 
 
 class Peer2PeerConnector:
@@ -298,7 +308,7 @@ class Peer2PeerConnector:
         self.task_in_process = False
         self.max_connection_attempts = 5
 
-    def run_task(self):
+    def run_task(self) -> None:
         message = Message(message_type=COMMAND, sender_id=self.client.id)
         if self.client.p2p_tcp_connection_possible:
             con_type = P2P_TCP
@@ -336,7 +346,7 @@ class Peer2PeerConnector:
         else:
             self.start_tcp_connection()
 
-    def new_connection_task(self, id_to_connect: int, initiator: bool):
+    def new_connection_task(self, id_to_connect: int, initiator: bool) -> bool:
 
         can_start_new_connection = True
         self.client.lock.acquire()
@@ -355,21 +365,21 @@ class Peer2PeerConnector:
         new_task.start()
         return True
 
-    def set_connection_type(self, connection_type):
+    def set_connection_type(self, connection_type: int) -> None:
         self.peer_data[1] = P2P_UDP
         if connection_type == P2P_TCP and self.client.p2p_tcp_connection_possible:
             self.peer_data[1] = P2P_TCP
         self.connection_type_stated = True
 
-    def stop_task(self):
+    def stop_task(self) -> None:
         self.task_in_process = False
 
-    def set_connection_data(self, public_address, private_address):
+    def set_connection_data(self, public_address: (str, int), private_address: (str, int)) -> None:
         self.peer_data[2] = public_address
         self.peer_data[3] = private_address
         self.connection_data_stated = True
 
-    def start_tcp_connection(self):
+    def start_tcp_connection(self) -> None:
         public_connector = socket.socket(family=socket.AF_INET, type=socket.SOCK_STREAM)
         private_connector = socket.socket(family=socket.AF_INET, type=socket.SOCK_STREAM)
         peer_public_address = self.peer_data[2]
@@ -432,7 +442,7 @@ class Peer2PeerConnector:
                 self.client.p2p_connected[self.peer_data[0]] = Friend(client_id=self.peer_data[0],
                                                                       private_address=peer_private_address,
                                                                       public_address=peer_public_address,
-                                                                      socket=final_socket)
+                                                                      sock=final_socket)
                 connection_done = True
 
             if connection_done:  # если подключение установилось завершаем цикл

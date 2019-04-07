@@ -1,18 +1,22 @@
 import hashlib
 from constants import *
+import socket
 
 
 class User:
     # Структура, содержащая данные о клиенте
-    def __init__(self, socket: 'socket.socket', client_id: int = 0, public_address: 'tuple(str, int)' = None):
-        self.socket = socket
+    def __init__(self, sock: socket.socket, client_id: int = 0, public_address: 'tuple(str, int)' = None,
+                 symmetric_key: bytes = None):
+        self.socket = sock
         self.id = client_id
         self.public_address = public_address
+        self.symmetric_key = symmetric_key
 
 
 class Message:
     # Структура содержащая данные о сообщении
-    def __init__(self, message_type: int = None, receiver_id: int = 0, sender_id: int = 0, length: int = 0, message: str = ""):
+    def __init__(self, message_type: int = None, receiver_id: int = 0, sender_id: int = 0, length: int = 0,
+                 message: str = ""):
         self.message_type = message_type
         self.receiver_id = receiver_id
         self.length = length
@@ -60,13 +64,11 @@ def get_message_from_client(user: User) -> Message:
             break
         b_message += message_part
 
-    message = Message(message_type=message_type,
-                      receiver_id=receiver_id,
-                      sender_id=sender_id,
-                      length=length,
-                      message=get_text_from_bytes_data(b_message)
-                      )
-    return message
+    return Message(message_type=message_type,
+                   receiver_id=receiver_id,
+                   sender_id=sender_id,
+                   length=length,
+                   message=get_text_from_bytes_data(b_message))
 
 
 def get_prepared_message(message: Message) -> (bytes, bytes):
@@ -80,7 +82,7 @@ def get_prepared_message(message: Message) -> (bytes, bytes):
     message_data = []
 
     # чтобы избежать ситуации когда мы получаем вместе с данными о сообщение и его само и возможно еще и часть
-    # следующих данных и т.д. данные о сообщении будут передаваться порциями по MESSAGE_DATA_SIZE символов,
+    # следующих данных и т.д. данные о сообщении будут передаваться порциями ровно по MESSAGE_DATA_SIZE символов,
     # последний символ которых равен 1, если еще есть данные об этом сообщении и 0 иначе.
     message_data_str += " " * (step - (len(message_data_str) % step))
     cnt = len(message_data_str) // step

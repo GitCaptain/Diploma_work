@@ -1,9 +1,10 @@
 from common_functions_and_data_structures import *
 from database import Database
-import socket
-import ssl
+from Crypto.Cipher import AES
+from Crypto.Random import get_random_bytes
 import threading  # заменить на настоящуюю многопоточность
 import traceback
+import ssl
 
 
 class Server:
@@ -211,11 +212,18 @@ class Server:
             socket.gethostbyname(socket.getfqdn()),
             PORT_TO_CONNECT)
         )
-
+        secure_context = ssl.create_default_context(purpose=ssl.Purpose.CLIENT_AUTH)
+        secure_context.load_cert_chain(certfile='secure/server_cert.pem', keyfile='secure/secret_key.pem')
         while True:
             connected_socket, connected_addres = self.server_socket.accept()
             print("connected:", connected_addres)
-            user = User(socket=connected_socket, public_address=connected_addres)
+
+            secure_connected_socket = secure_context.wrap_socket(connected_socket, server_side=True)
+            symmetric_key = get_random_bytes(16)  # 128 bit length key is enough
+            send_message_to_client(User(sock=secure_connected_socket), message=Message(message=symmetric_key))
+            connected_socket = secure_connected_socket.unwrap()
+
+            user = User(sock=connected_socket, public_address=connected_addres, symmetric_key=symmetric_key)
             process_user_thread = threading.Thread(target=self.process_client, args=(user,))
             process_user_thread.start()
 
