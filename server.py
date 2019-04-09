@@ -162,7 +162,7 @@ class Server:
         self.thread_locals.database = Database()
         try:
             while True:
-                message = get_message_from_client(user)
+                message = get_message_from_client(user, server=True)
                 if not message:
                     break
                 if self.thread_locals.user_authenticated and message.message_type == MESSAGE:
@@ -218,7 +218,7 @@ class Server:
             print("connected:", connected_addres)
 
             secure_connected_socket = secure_context.wrap_socket(connected_socket, server_side=True)
-            symmetric_key = get_random_bytes(16)  # 128 bit length key is enough
+            symmetric_key = get_random_bytes(SYMMETRIC_KEY_LEN_IN_BYTES)  # 256 bit length key is enough
             send_message_to_client(User(sock=secure_connected_socket),
                                    message=Message(message_type=AUTH, message=symmetric_key))
             connected_socket = secure_connected_socket.unwrap()

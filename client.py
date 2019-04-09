@@ -4,8 +4,6 @@ import traceback
 import sys
 import time
 import selectors
-from Crypto.Cipher import AES
-from Crypto.Random import get_random_bytes
 import ssl
 
 
@@ -62,10 +60,13 @@ class Client:
             self.p2p_tcp_listener.bind(self.private_tcp_address)
             self.p2p_tcp_listener.listen(self.max_queue)
 
-        self.server = Friend(public_address=server_hostname, sock=server_tcp_socket, client_id=0,
-                             symmetric_key=server_symmetric_key)
         self.friendly_users = dict()  # id: Friend
         self.p2p_connected = dict()  # id: Friend
+
+        self.server = Friend(public_address=server_hostname, sock=server_tcp_socket, client_id=0,
+                             symmetric_key=server_symmetric_key)
+        self.friendly_users[SERVER_ID] = self.server
+
         self.id = 0  # не аутентифицирован
         self.lock = threading.Lock()
         self.connector = Peer2PeerConnector(self)
@@ -79,7 +80,7 @@ class Client:
 
     def connect_to_server(self, server_address: '(str, int)') -> socket:
         secure_context = ssl.create_default_context(cafile='secure/CA.pem')
-        # обязательно вернуть ТРУ, когда будет сервер нейм, лиюо разобраться с альтнеймами в серитфикатах
+        # обязательно вернуть ТРУ, когда будет сервер нейм, либо разобраться с альтнеймами в серитфикатах
         secure_context.check_hostname = False
         server_socket = socket.socket(family=socket.AF_INET, type=socket.SOCK_STREAM)
         secure_server_socket = secure_context.wrap_socket(server_socket)
@@ -103,6 +104,10 @@ class Client:
                 message = get_message_from_client(target)
                 if not message:  # Что-то пошло не так и сервер отключился
                     break
+                if message.secret:
+                    key = self.friendly_users[message.sender_id].symmetric_key
+                    message = get_decrypted_message(message, key=key)
+                message.message = get_text_from_bytes_data(message.message)
                 if message.message_type == COMMAND:
                     self.command_handler(message)
                 elif message.message_type == MESSAGE:
@@ -239,7 +244,7 @@ class Client:
                 print("Подключение не установлено")
                 return
         message = Message(message_type=MESSAGE, message=get_input("Введите сообщение:\n"),
-                          receiver_id=receiver_id, sender_id=sender_id)
+                          receiver_id=receiver_id, sender_id=sender_id, secret=secret)
         send_message_to_client(target, message)
 
     def get_user_command(self) -> None:
