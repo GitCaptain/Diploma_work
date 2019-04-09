@@ -9,7 +9,6 @@ from Crypto.Random import get_random_bytes
 import ssl
 
 
-
 def get_input(prompt_str: str) -> str:
     return input(prompt_str).strip()
 
@@ -31,6 +30,7 @@ class Friend(User):
         self.login = login
         self.private_address = private_address
         self.public_asymmetric_key = public_asymmetric_key
+
 
 class Client:
 
@@ -78,7 +78,9 @@ class Client:
         user_handler_thread.start()
 
     def connect_to_server(self, server_address: '(str, int)') -> socket:
-        secure_context = ssl.create_default_context(cafile='secure/CAcert.pem')
+        secure_context = ssl.create_default_context(cafile='secure/CA.pem')
+        # обязательно вернуть ТРУ, когда будет сервер нейм, лиюо разобраться с альтнеймами в серитфикатах
+        secure_context.check_hostname = False
         server_socket = socket.socket(family=socket.AF_INET, type=socket.SOCK_STREAM)
         secure_server_socket = secure_context.wrap_socket(server_socket)
         while not connect_to_address(secure_server_socket, server_address):

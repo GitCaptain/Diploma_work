@@ -207,20 +207,20 @@ class Server:
     def run(self) -> None:
         command_handler = threading.Thread(target=self.server_command_handler)
         command_handler.start()
-
         print("the server is running\nhost: {}, port: {}".format(
             socket.gethostbyname(socket.getfqdn()),
             PORT_TO_CONNECT)
         )
         secure_context = ssl.create_default_context(purpose=ssl.Purpose.CLIENT_AUTH)
-        secure_context.load_cert_chain(certfile='secure/server_cert.pem', keyfile='secure/secret_key.pem')
+        secure_context.load_cert_chain(certfile='secure/server.pem', keyfile='secure/server.key')
         while True:
             connected_socket, connected_addres = self.server_socket.accept()
             print("connected:", connected_addres)
 
             secure_connected_socket = secure_context.wrap_socket(connected_socket, server_side=True)
             symmetric_key = get_random_bytes(16)  # 128 bit length key is enough
-            send_message_to_client(User(sock=secure_connected_socket), message=Message(message=symmetric_key))
+            send_message_to_client(User(sock=secure_connected_socket),
+                                   message=Message(message_type=AUTH, message=symmetric_key))
             connected_socket = secure_connected_socket.unwrap()
 
             user = User(sock=connected_socket, public_address=connected_addres, symmetric_key=symmetric_key)

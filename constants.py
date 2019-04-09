@@ -16,6 +16,7 @@ DB_USER_ALREADY_EXIST = 0
 # Request Consts
 MESSAGE = 1
 COMMAND = 2
+AUTH = 3
 
 # Command to server Consts
 LOG_IN = 1

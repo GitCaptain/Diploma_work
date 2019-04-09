@@ -64,11 +64,16 @@ def get_message_from_client(user: User) -> Message:
             break
         b_message += message_part
 
+    if message_type == AUTH:
+        mes = b_message  # получаем ключ
+    else:
+        mes = get_text_from_bytes_data(b_message)
+
     return Message(message_type=message_type,
                    receiver_id=receiver_id,
                    sender_id=sender_id,
                    length=length,
-                   message=get_text_from_bytes_data(b_message))
+                   message=mes)
 
 
 def get_prepared_message(message: Message) -> (bytes, bytes):
@@ -108,6 +113,8 @@ def send_message_to_client(receiver: User, message: Message) -> None:
 
 
 def get_bytes_string(string: str) -> bytes:
+    if isinstance(string, bytes):  # если вдруг пришли сразу байты (например ключ шифрования)
+        return string
     return bytes(string, ENCODING)
 
 
