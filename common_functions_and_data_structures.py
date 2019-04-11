@@ -3,6 +3,7 @@ from constants import *
 import socket
 from Crypto.Cipher import AES
 from Crypto.Random import get_random_bytes
+from Crypto.Hash import HMAC, SHA256
 
 
 class User:
@@ -36,20 +37,39 @@ def get_hash(string: str, hash_func=hashlib.sha1) -> str:
     return hash_func(get_bytes_string(string)).hexdigest()
 
 
-def get_encrypted_message(message: bytes, key: bytes, digest_only = False) -> (bytes, bytes, bytes):
-    # nonce - a value that must never be reused for any other encryption done with this key.
-    # For MODE_EAX, there are no restrictions on its length (recommended: 16 bytes).
-    cipher = AES.new(key, AES.MODE_EAX, nonce=get_random_bytes(16))
-    ciphertext, tag = cipher.encrypt_and_digest(message)
-    return ciphertext, tag, cipher.nonce
+def get_encrypted_message(message: bytes, key: bytes, need_encrypt: bool = False) -> (bytes, bytes, bytes):
+    if need_encrypt:
+        # nonce - a value that must never be reused for any other encryption done with this key.
+        # For MODE_EAX, there are no restrictions on its length (recommended: 16 bytes).
+        cipher = AES.new(key, AES.MODE_EAX, nonce=get_random_bytes(AES_NONCE_LENGTH_IN_BYTES))
+        ciphertext, tag = cipher.encrypt_and_digest(message)
+        nonce = cipher.nonce
+    else:
+        mac = HMAC.new(key, digestmod=SHA256)
+        mac.update(message)
+        tag = mac.digest()
+        ciphertext = message
+        nonce = b''
+    return ciphertext, tag, nonce
 
 
-def get_decrypted_message(message: Message, key: bytes, verify_only: bool = False) -> Message:
-    cipher = AES.new(key, AES.MODE_EAX, message.nonce)
+def get_decrypted_message(message: Message, key: bytes, need_decrypt: bool = False) -> Message:
     try:
-        message.message = cipher.decrypt_and_verify(message.message, message.tag)
-    except ValueError:  # Сообщение повреждено при передаче, считаем, что оно просто не приходило
-        return Message()
+        if need_decrypt:
+            cipher = AES.new(key, AES.MODE_EAX, message.nonce)
+            message.message = cipher.decrypt_and_verify(message.message, message.tag)
+        else:
+            mac = HMAC.new(key, digestmod=SHA256)
+            mac.update(message.message)
+            mac.verify(message.tag)
+    except ValueError:  # Сообщение повреждено при передаче
+        mes = b'Message corrupted during transmission'
+        return Message(message_type=message.message_type,
+                       message=mes,
+                       receiver_id=message.receiver_id,
+                       sender_id=message.sender_id,
+                       length=len(mes),
+                       secret=False)
     return message
 
 
@@ -96,28 +116,29 @@ def get_message_from_client(user: User, server: bool = False) -> Message:
     tag = recv_message(tag_length)
     nonce = recv_message(nonce_length)
 
-    if server:
-        mes = get_text_from_bytes_data(b_message)
-    else:
-        mes = b_message
+    message = Message(message_type=message_type,
+                      receiver_id=receiver_id,
+                      sender_id=sender_id,
+                      length=message_length,
+                      message=b_message,
+                      secret=bool(secret),
+                      message_tag=tag,
+                      message_nonce=nonce)
 
-    return Message(message_type=message_type,
-                   receiver_id=receiver_id,
-                   sender_id=sender_id,
-                   length=message_length,
-                   message=mes,
-                   secret=bool(secret),
-                   message_tag=tag,
-                   message_nonce=nonce)
+    if not message.message_type == AUTH:
+        message = get_decrypted_message(message, user.symmetric_key, message.secret)
+        message.message = get_text_from_bytes_data(message.message)
+
+    return message
 
 
 def get_prepared_message(message: Message, symmetric_key: bytes) -> (bytes, bytes):
     message.message = get_bytes_string(message.message)
 
-    if message.secret:
-        message.message, tag, nonce = get_encrypted_message(message.message, symmetric_key)
-    else:  # Все сообщения нужно подписывать, пока не понятно как
-        tag, nonce = b'', b''
+    if not message.message_type == AUTH:
+        message.message, tag, nonce = get_encrypted_message(message.message, symmetric_key, need_encrypt=message.secret)
+    else:
+        tag = nonce = b''
 
     message.length = len(message.message)
     message_data_str = "{message_type} " \

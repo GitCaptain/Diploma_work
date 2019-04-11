@@ -71,6 +71,9 @@ class Client:
         self.lock = threading.Lock()
         self.connector = Peer2PeerConnector(self)
 
+    def init_client(self):
+        pass
+
     def run(self) -> None:
         server_handler_thread = threading.Thread(target=self.server_handler)
         server_handler_thread.start()
@@ -104,10 +107,7 @@ class Client:
                 message = get_message_from_client(target)
                 if not message:  # Что-то пошло не так и сервер отключился
                     break
-                if message.secret:
-                    key = self.friendly_users[message.sender_id].symmetric_key
-                    message = get_decrypted_message(message, key=key)
-                message.message = get_text_from_bytes_data(message.message)
+
                 if message.message_type == COMMAND:
                     self.command_handler(message)
                 elif message.message_type == MESSAGE:
@@ -203,7 +203,7 @@ class Client:
         if auth_type == LOG_IN:
             get_pending_thread = threading.Thread(target=self.get_pending_messages)
             get_pending_thread.start()
-        message = Message(message_type=COMMAND)
+        message = Message(message_type=COMMAND, secret=True)
         login = get_input("Введите логин\n")
         password = get_input("Введите пароль\n")
         if not login or not password:

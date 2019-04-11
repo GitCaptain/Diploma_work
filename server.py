@@ -9,20 +9,22 @@ import ssl
 
 class Server:
 
-    authenticated_users = dict()  # список подключенных user'ов (клиентов) client_id: user
-    host = ''  # Подключение принимаем от любого компьютера в сети
-    max_queue = 5  # число соединений, которые будут находиться в очереди соединений до вызова accept
-    # список команд доступных для сервера
-    commands = ['/commands - показать список команд и их описание',
-                '/end - остановить работу сервера']
-
     def __init__(self):
+
+        self.host = ''  # Подключение принимаем от любого компьютера в сети
+        self.max_queue = 5  # число соединений, которые будут находиться в очереди соединений до вызова accept
+        # список команд доступных для сервера
+        self.commands = ['/commands - показать список команд и их описание',
+                         '/end - остановить работу сервера']
+
         # создаем сокет, работающий по протоколу TCP
         self.server_socket = socket.socket(family=socket.AF_INET, type=socket.SOCK_STREAM)
         # (хост, порт) = хост - машина которую мы слушаем, если не указана, то принимаются связи от всех машин,
         # порт - номер порта который принимает соединение
         self.server_socket.bind((self.host, PORT_TO_CONNECT))
         self.server_socket.listen(self.max_queue)
+
+        self.authenticated_users = dict()  # список подключенных user'ов (клиентов) client_id: user
         self.thread_locals = threading.local()
         self.id = SERVER_ID
         # Инициализируем базу данных
