@@ -127,7 +127,8 @@ def get_message_from_client(user: User, server: bool = False) -> Message:
 
     if not message.message_type == AUTH:
         message = get_decrypted_message(message, user.symmetric_key, message.secret)
-        message.message = get_text_from_bytes_data(message.message)
+        if not message.message_type == BYTES_COMMAND and not message.message_type == BYTES_MESSAGE:
+            message.message = get_text_from_bytes_data(message.message)
 
     return message
 

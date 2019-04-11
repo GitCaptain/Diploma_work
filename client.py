@@ -108,9 +108,9 @@ class Client:
                 if not message:  # Что-то пошло не так и сервер отключился
                     break
 
-                if message.message_type == COMMAND:
+                if message.message_type == COMMAND or message.message_type == BYTES_COMMAND:
                     self.command_handler(message)
-                elif message.message_type == MESSAGE:
+                elif message.message_type == MESSAGE or message.message_type == BYTES_MESSAGE:
                     self.message_handler(message)
                 else:
                     pass
@@ -158,7 +158,8 @@ class Client:
             print("Пользователь найден, uid:", data[1])
         elif command == P2P_CONNECTION_DATA:
             # data = [..., 'P2P_CONNECTION_TYPE', peer_id', 'con_type'] or
-            # data = [..., 'P2P_ADDRESS', 'peer_id', 'public_ip', 'public_port', 'private_ip', 'private_port']
+            # data = [..., 'P2P_ADDRESS', 'peer_id', 'public_ip', 'public_port', 'private_ip', 'private_port'] or
+            # data = [..., b'P2P_CONNECTION_SYMMETRIC_KEY', b'peer_id', b'symmetric_key']
             command_type = int(data[1])
             peer_id = int(data[2])
 
@@ -166,16 +167,17 @@ class Client:
                 # данный клиент не инициатор соединения, и не соединяется с другим клиентом
                 self.connector.new_connection_task(peer_id, False)
 
-            if command_type == P2P_CONNECTION_TYPE:
-                if self.connector.peer_data[0] == peer_id:  # получили данные от нужного пользователя
-                    self.connector.set_connection_type(int(data[3]))
-            elif command_type == P2P_ADDRESS:
-                if self.connector.peer_data[0] == peer_id:  # получили данные от нужного пользователя
-                    public_address = (data[3], int(data[4]))
-                    private_address = (data[5], int(data[6]))
-                    self.connector.set_connection_data(public_address, private_address)
-            else:
-                pass
+            if self.connector.peer_data[0] == peer_id:  # получили данные от нужного пользователя
+                if command_type == P2P_CONNECTION_TYPE:
+                        self.connector.set_connection_type(int(data[3]))
+                elif command_type == P2P_ADDRESS:
+                        public_address = (data[3], int(data[4]))
+                        private_address = (data[5], int(data[6]))
+                        self.connector.set_connection_data(public_address, private_address)
+                elif command_type == P2P_CONNECTION_SYMMETRIC_KEY:
+                        self.connector.set_symmetric_key(data[3])
+                else:
+                    pass
         elif command == P2P_USER_OFFLINE:
             self.connector.stop_task()
             print("Пользователь сейчас не в сети")
@@ -308,22 +310,45 @@ class Peer2PeerConnector:
     def __init__(self, peer: Client):
         self.client = peer
         self.client_initiator = False
-        self.peer_data = [None for _ in range(4)]  # id, connection_type, public_address, private_address
+        self.peer_data_items_count = 5
+        # id, connection_type, public_address, private_address, symmetric_key
+        self.peer_data = [None for _ in range(self.peer_data_items_count)]
 
         self.connection_type_stated = False
         self.connection_data_stated = False
+        self.symmetric_key_stated = False
         self.task_in_process = False
         self.max_connection_attempts = 5
 
     def run_task(self) -> None:
-        message = Message(message_type=COMMAND, sender_id=self.client.id)
+        message = Message(sender_id=self.client.id)
+        command = CREATE_P2P_CONNECTION
+
+        message.message_type = BYTES_COMMAND
+        message.secret = True
+
+        # Устанавливаем общий ключ
+        command_type = P2P_CONNECTION_SYMMETRIC_KEY
+        if self.client_initiator:
+            message.message = get_bytes_string("{} {} {} ".format(command, command_type, self.peer_data[0])) \
+                              + self.peer_data[4]
+            send_message_to_client(self.client.server, message)
+
+        while not self.symmetric_key_stated and self.task_in_process:
+            pass
+
+        if not self.task_in_process:
+            return
+
+        message.message_type = COMMAND
+        message.secret = False
+
+        # Выбираем тип соединения
+        command_type = P2P_CONNECTION_TYPE
         if self.client.p2p_tcp_connection_possible:
             con_type = P2P_TCP
         else:
             con_type = P2P_UDP
-
-        command = CREATE_P2P_CONNECTION
-        command_type = P2P_CONNECTION_TYPE
 
         message.message = "{} {} {} {}".format(command, command_type, self.peer_data[0], con_type)
         send_message_to_client(self.client.server, message)
@@ -334,6 +359,7 @@ class Peer2PeerConnector:
         if not self.task_in_process:
             return
 
+        # Устанавливаем данные для соединения
         command_type = P2P_ADDRESS
         if self.peer_data[1] == P2P_UDP:
             pass
@@ -365,8 +391,12 @@ class Peer2PeerConnector:
         if not can_start_new_connection:
             return False
 
-        self.peer_data = [None for _ in range(4)]  # id, connection_type, public_address, private_address
+        # id, connection_type, public_address, private_address, symmetric_key
+        self.peer_data = [None for _ in range(self.peer_data_items_count)]
         self.peer_data[0] = id_to_connect
+        if initiator:
+            self.peer_data[4] = get_random_bytes(SYMMETRIC_KEY_LEN_IN_BYTES)
+            self.symmetric_key_stated = True
         self.client_initiator = initiator
         new_task = threading.Thread(target=self.run_task)
         new_task.start()
@@ -377,6 +407,10 @@ class Peer2PeerConnector:
         if connection_type == P2P_TCP and self.client.p2p_tcp_connection_possible:
             self.peer_data[1] = P2P_TCP
         self.connection_type_stated = True
+
+    def set_symmetric_key(self, symmetric_key: bytes) -> None:
+        self.peer_data[4] = symmetric_key
+        self.symmetric_key_stated = True
 
     def stop_task(self) -> None:
         self.task_in_process = False
@@ -449,7 +483,8 @@ class Peer2PeerConnector:
                 self.client.p2p_connected[self.peer_data[0]] = Friend(client_id=self.peer_data[0],
                                                                       private_address=peer_private_address,
                                                                       public_address=peer_public_address,
-                                                                      sock=final_socket)
+                                                                      sock=final_socket,
+                                                                      symmetric_key=self.peer_data[4])
                 connection_done = True
 
             if connection_done:  # если подключение установилось завершаем цикл

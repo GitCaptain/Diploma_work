@@ -82,7 +82,8 @@ class Server:
                 send_message_to_client(user, message)
         elif command == CREATE_P2P_CONNECTION:
             # data = [..., 'P2P_CONNECTION_TYPE', 'peer_id','con_type'] or
-            # data = [..., 'P2P_ADDRESS', 'peer_id', 'private_ip', 'private_port']
+            # data = [..., 'P2P_ADDRESS', 'peer_id', 'private_ip', 'private_port'] or
+            # data = [..., b'P2P_CONNECTION_SYMMETRIC_KEY', b'peer_id', b'symmetric_key']
             command_type = int(data[1])
             second_peer_id = int(data[2])
             message = Message(message_type=COMMAND, receiver_id=user.id)
@@ -92,15 +93,19 @@ class Server:
                 return False
             second_peer = self.authenticated_users[second_peer_id]
 
-            message = Message(message_type=COMMAND, receiver_id=second_peer.id)
+            message = Message(receiver_id=second_peer.id)
             command_to_peer = P2P_CONNECTION_DATA
             if command_type == P2P_ADDRESS:
+                message.message_type = COMMAND
                 user_private_address = data[3], int(data[4])
                 message.message = "{} {} {} {} {} {} {}".format(command_to_peer, command_type, user.id,
                                                                 *user.public_address, *user_private_address)
             elif command_type == P2P_CONNECTION_TYPE:
+                message.message_type = COMMAND
                 message.message = "{} {} {} {}".format(command_to_peer, command_type, user.id, data[3])
-
+            elif command_type == P2P_CONNECTION_SYMMETRIC_KEY:
+                message.message_type = BYTES_COMMAND
+                message.message = get_bytes_string("{} {} {} ".format(command_to_peer, command_type, user.id)) + data[3]
             send_message_to_client(second_peer, message)
 
         else:
@@ -167,9 +172,10 @@ class Server:
                 message = get_message_from_client(user, server=True)
                 if not message:
                     break
-                if self.thread_locals.user_authenticated and message.message_type == MESSAGE:
+                if self.thread_locals.user_authenticated and (message.message_type == MESSAGE or
+                                                              message.message_type == BYTES_MESSAGE):
                     self.process_message(message)
-                elif message.message_type == COMMAND:
+                elif message.message_type == COMMAND or message.message_type == BYTES_COMMAND:
                     self.process_command(user, message)
                 else:
                     pass
