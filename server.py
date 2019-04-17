@@ -1,5 +1,5 @@
 from common_functions_and_data_structures import *
-from database import Database
+from server_database import *
 from Crypto.Cipher import AES
 from Crypto.Random import get_random_bytes
 import threading  # заменить на настоящуюю многопоточность
@@ -26,9 +26,11 @@ class Server:
 
         self.authenticated_users = dict()  # список подключенных user'ов (клиентов) client_id: user
         self.thread_locals = threading.local()
+        self.lock = threading.Lock()
         self.id = SERVER_ID
         # Инициализируем базу данных
-        Database(need_server_init=True)
+        ServerUserDatabase(need_server_init=True)
+        ServerMessageDatabase(need_server_init=True)
 
     def process_command(self, user: User, message: Message) -> bool:  # разнести все по функциям
         # message.message = 'command_type ...'
@@ -47,7 +49,7 @@ class Server:
             self.thread_locals.user_authenticated = False
             if not user.id:
                 return False
-            self.thread_locals.database.delete_user(user.id)
+            self.thread_locals.users_database.delete_user(user.id)
             self.authenticated_users.pop(user.id)
             user.id = 0
             return True
@@ -59,7 +61,7 @@ class Server:
         elif command == GET_USER_ID_BY_LOGIN:  # переработать, вынести в отдельную функцию
             # data = [..., 'login']
             login = data[1]
-            uid = self.thread_locals.database.get_id_by_login(login)
+            uid = self.thread_locals.users_database.get_id_by_login(login)
             message = Message(message_type=COMMAND)
             if uid == DB_USER_NOT_EXIST:
                 message.message = str(USER_NOT_EXIST)
@@ -74,7 +76,7 @@ class Server:
             user.id = 0
             return True
         elif command == GET_PENDING_MESSAGES:
-            pendings = self.thread_locals.database.get_pending_messages(user.id)
+            pendings = self.thread_locals.messages_database.get_pending_messages(user.id)
             message = Message(message_type=MESSAGE, receiver_id=user.id)
             for sender_id, pending_message in pendings:
                 message.sender_id = sender_id
@@ -112,7 +114,13 @@ class Server:
             pass
 
     def client_registration(self, user: User, login: str, password: str) -> bool:
-        uid = self.thread_locals.database.add_user(login, get_hash(password))
+
+        saltl = get_random_bytes(8)
+        saltr = get_random_bytes(8)
+
+        self.lock.acquire()
+        uid = self.thread_locals.users_database.add_user(login, get_hash(password))
+        self.lock.release()
 
         response_message = Message(message_type=COMMAND, sender_id=self.id)
         if uid == DB_USER_ALREADY_EXIST:
@@ -129,7 +137,7 @@ class Server:
     def client_authentication(self, user: User, login: str, password: str) -> bool:
         # secure_context = ssl.create_default_context()  # возможно нужен не дефолтный контекст, почитать
         # ssl_client = secure_context.wrap_socket(client, server_side=True)
-        uid = self.thread_locals.database.check_person(login, get_hash(password))
+        uid = self.thread_locals.users_database.check_person(login, get_hash(password))
         response_message = Message(message_type=COMMAND, sender_id=self.id)
         if uid == DB_WRONG_LOGIN:
             response_message.message = str(WRONG_LOGIN)
@@ -150,10 +158,10 @@ class Server:
         if message.receiver_id in self.authenticated_users:
             receiver = self.authenticated_users[message.receiver_id]
             send_message_to_client(receiver, message)
-        elif self.thread_locals.database.check_if_user_exist(user_id=message.receiver_id):
-            self.thread_locals.database.add_pending_message(sender_id=message.sender_id,
-                                                            receiver_id=message.receiver_id,
-                                                            message=message.message)
+        elif self.thread_locals.users_database.check_if_user_exist(user_id=message.receiver_id):
+            self.thread_locals.messages_database.add_pending_message(sender_id=message.sender_id,
+                                                                     receiver_id=message.receiver_id,
+                                                                     message=message.message)
         else:
             receiver = self.authenticated_users[message.sender_id]
             message.receiver_id = message.sender_id
@@ -166,7 +174,8 @@ class Server:
         # Возможно, что при заверщении работы сервера будет обращение к закрытому клиентскому сокету, и вылезет ошибка,
         # но это не страшно, просто нужно написать какой-нибудь обработчик или закрыть
         self.thread_locals.user_authenticated = False
-        self.thread_locals.database = Database()
+        self.thread_locals.users_database = ServerUserDatabase()
+        self.thread_locals.messages_database = ServerMessageDatabase()
         try:
             while True:
                 message = get_message_from_client(user, server=True)

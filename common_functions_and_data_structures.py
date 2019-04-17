@@ -1,4 +1,3 @@
-import hashlib
 from constants import *
 import socket
 from Crypto.Cipher import AES
@@ -33,8 +32,8 @@ class Message:
         return bool(self.message)
 
 
-def get_hash(string: str, hash_func=hashlib.sha1) -> str:
-    return hash_func(get_bytes_string(string)).hexdigest()
+def get_hash(string: str, saltl: bytes = b'', saltr: bytes = b'', hash_func=SHA256) -> str:
+    return hash_func.new(data=saltl + get_bytes_string(string) + saltr).hexdigest()
 
 
 def get_encrypted_message(message: bytes, key: bytes, need_encrypt: bool = False) -> (bytes, bytes, bytes):
@@ -129,7 +128,10 @@ def get_message_from_client(user: User, server: bool = False) -> Message:
         message = get_decrypted_message(message, user.symmetric_key, message.secret)
         if not message.message_type == BYTES_COMMAND and not message.message_type == BYTES_MESSAGE:
             message.message = get_text_from_bytes_data(message.message)
-
+    """
+    if server:
+        print("server got:", message.message, "\nfrom", message.sender_id, "to", message.receiver_id)
+    """
     return message
 
 

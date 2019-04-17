@@ -5,6 +5,9 @@ import sys
 import time
 import selectors
 import ssl
+from client_database import *
+from Crypto.PublicKey import RSA
+import os
 
 
 def get_input(prompt_str: str) -> str:
@@ -61,7 +64,9 @@ class Client:
             self.p2p_tcp_listener.listen(self.max_queue)
 
         self.friendly_users = dict()  # id: Friend
-        self.p2p_connected = dict()  # id: Friend
+        self.init_friends()
+
+        self.p2p_connected = dict()  # id: Friend -> set ids!!!!
 
         self.server = Friend(public_address=server_hostname, sock=server_tcp_socket, client_id=0,
                              symmetric_key=server_symmetric_key)
@@ -69,10 +74,30 @@ class Client:
 
         self.id = 0  # не аутентифицирован
         self.lock = threading.Lock()
+        self.thread_locals = threading.local()
+        self.thread_locals.users_database = ClientUserDatabase()
         self.connector = Peer2PeerConnector(self)
+        self.public_key = self.private_key = None
+        self.init_keys()
 
-    def init_client(self):
+    def init_friends(self) -> None:
         pass
+
+    def init_keys(self) -> None:
+        secure = 'secure' + os.sep
+        if not os.path.exists(secure + 'private.pem') or not os.path.exists(secure + 'public.pem'):
+            # либо ключ еще не был создан, либо с ним что-то случилось, генерируем новую пару
+            key_pair = RSA.generate(RSA_KEY_LEN_IN_BITS)
+            self.private_key = key_pair.export_key()
+            self.public_key = key_pair.publickey().export_key()
+            with open(secure + 'private.pem', 'wb') as priv, open(secure + 'public.pem', 'wb') as publ:
+                priv.write(self.private_key)
+                publ.write(self.public_key)
+        else:
+            # возвращаем сохраненный ключ
+            with open(secure + 'private.pem', 'rb') as priv, open(secure + 'public.pem', 'rb') as publ:
+                self.private_key = priv.read()
+                self.public_key = publ.read()
 
     def run(self) -> None:
         server_handler_thread = threading.Thread(target=self.server_handler)
@@ -80,6 +105,20 @@ class Client:
 
         user_handler_thread = threading.Thread(target=self.user_handler)
         user_handler_thread.start()
+
+        """
+        print(REGISTER_USER, "- зарегистрироваться\n",
+              LOG_IN, "- войти")
+        act = ''
+        while True:
+            act = input()
+            if not act.isdigit():
+                continue
+            act = int(act)
+            if not act == LOG_IN and not act == REGISTER_USER:
+                continue
+            break
+        """
 
     def connect_to_server(self, server_address: '(str, int)') -> socket:
         secure_context = ssl.create_default_context(cafile='secure/CA.pem')
@@ -330,8 +369,9 @@ class Peer2PeerConnector:
         # Устанавливаем общий ключ
         command_type = P2P_CONNECTION_SYMMETRIC_KEY
         if self.client_initiator:
-            message.message = get_bytes_string("{} {} {} ".format(command, command_type, self.peer_data[0])) \
-                              + self.peer_data[4]
+            print("key:", self.peer_data[4])
+            message.message = get_bytes_string("{} {} {} ".format(command, command_type, self.peer_data[0])) + \
+                              self.peer_data[4]
             send_message_to_client(self.client.server, message)
 
         while not self.symmetric_key_stated and self.task_in_process:
