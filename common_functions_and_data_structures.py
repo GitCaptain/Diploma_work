@@ -6,17 +6,23 @@ from Crypto.Hash import HMAC, SHA256
 
 
 class User:
-    # Структура, содержащая данные о клиенте
+    """
+    Структура, содержащая данные о клиенте
+    """
     def __init__(self, sock: socket.socket, client_id: int = 0, public_address: 'tuple(str, int)' = None,
                  symmetric_key: bytes = None):
         self.socket = sock
         self.id = client_id
         self.public_address = public_address
         self.symmetric_key = symmetric_key
+        # для каждого секретного чата с другим id хранится номер сессии этого секретного чата id: session_id
+        self.session_ids = dict()
 
 
 class Message:
-    # Структура содержащая данные о сообщении
+    """
+    Структура содержащая данные о сообщении
+    """
     def __init__(self, message_type: int = None, receiver_id: int = 0, sender_id: int = 0, length: int = 0,
                  message: (bytes, str) = "", secret: bool = False, message_tag: bytes = b'', message_nonce: bytes = b''):
         self.message_type = message_type
@@ -32,8 +38,16 @@ class Message:
         return bool(self.message)
 
 
-def get_hash(string: str, saltl: bytes = b'', saltr: bytes = b'', hash_func=SHA256) -> str:
-    return hash_func.new(data=saltl + get_bytes_string(string) + saltr).hexdigest()
+def get_hash(string: bytes, saltl: bytes = b'', saltr: bytes = b'', hash_func=SHA256) -> bytes:
+    """
+    Получаем хеш строки string с "солью"
+    :param string:
+    :param saltl: "соль" (набор байт) которая будет приписана слева к строке
+    :param saltr: то-же самое, но справа
+    :param hash_func: функция хеширования
+    :return: хеш строки
+    """
+    return hash_func.new(data=saltl + string + saltr).digest()
 
 
 def get_encrypted_message(message: bytes, key: bytes, need_encrypt: bool = False) -> (bytes, bytes, bytes):
@@ -124,10 +138,16 @@ def get_message_from_client(user: User, server: bool = False) -> Message:
                       message_tag=tag,
                       message_nonce=nonce)
 
-    if not message.message_type == AUTH:
+    if server and message_type == MESSAGE:
+        # сообщение нужно просто добавить в БД и переслать (не расшифровывая)
+        pass
+    else:
         message = get_decrypted_message(message, user.symmetric_key, message.secret)
-        if not message.message_type == BYTES_COMMAND and not message.message_type == BYTES_MESSAGE:
-            message.message = get_text_from_bytes_data(message.message)
+
+    #  Получили данные, которые нужно преобразовывать в строку
+    if not message.message_type == BYTES_COMMAND and not message.message_type == BYTES_MESSAGE:
+        message.message = get_text_from_bytes_data(message.message)
+
     """
     if server:
         print("server got:", message.message, "\nfrom", message.sender_id, "to", message.receiver_id)
@@ -138,10 +158,7 @@ def get_message_from_client(user: User, server: bool = False) -> Message:
 def get_prepared_message(message: Message, symmetric_key: bytes) -> (bytes, bytes):
     message.message = get_bytes_string(message.message)
 
-    if not message.message_type == AUTH:
-        message.message, tag, nonce = get_encrypted_message(message.message, symmetric_key, need_encrypt=message.secret)
-    else:
-        tag = nonce = b''
+    message.message, tag, nonce = get_encrypted_message(message.message, symmetric_key, need_encrypt=message.secret)
 
     message.length = len(message.message)
     message_data_str = "{message_type} " \
@@ -191,6 +208,8 @@ def send_message_to_client(receiver: User, message: Message) -> None:
 
 
 def get_bytes_string(string: str) -> bytes:
+    if isinstance(string, memoryview):  # если вдруг пришли memoryview (например из БД пришли ключи)
+        return bytes(string)
     if isinstance(string, bytes):  # если вдруг пришли сразу байты (например ключ шифрования)
         return string
     return bytes(string, ENCODING)
