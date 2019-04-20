@@ -6,8 +6,10 @@ import time
 import selectors
 import ssl
 from client_database import *
+from Crypto.Cipher import PKCS1_OAEP
 from Crypto.PublicKey import RSA
 import os
+from collections import namedtuple
 
 
 def get_input(prompt_str: str) -> str:
@@ -23,7 +25,32 @@ def connect_to_address(socket_connector, address):
     return connected
 
 
+def RSA_decrypt(rsa_key: bytes, message: bytes) -> bytes:
+    """
+    Расшифровываем сообщение ассиметричным ключом
+    :param rsa_key:
+    :param message:
+    :return: расшифрованное сообщение
+    """
+    cipher_rsa = PKCS1_OAEP.new(rsa_key)
+    return cipher_rsa.decrypt(message)
+
+
+def RSA_encrypt(rsa_key: bytes, message: bytes) -> bytes:
+    """
+    Зашифровываем сообщение ассиметричным ключом
+    :param rsa_key:
+    :param message:
+    :return: зашифрованное сообщение
+    """
+    cipher_rsa = PKCS1_OAEP.new(rsa_key)
+    return cipher_rsa.encrypt(message)
+
+
 class Friend(User):
+    """
+    Класс для представления данных о друге и истории переписки с ним
+    """
     def __init__(self, sock: socket.socket = None, client_id: int = 0, public_address: 'tuple(str, int)' = None,
                  private_address: 'tuple(str, int)' = None, login: str = '', symmetric_key: bytes = None,
                  public_asymmetric_key: bytes = None):
@@ -31,6 +58,11 @@ class Friend(User):
         self.login = login
         self.private_address = private_address
         self.public_asymmetric_key = public_asymmetric_key
+
+        # все списки чатов имеют следующую структуру:
+        # message_info = namedtuple("message_info", "sender message") является ли данный друг отправителем
+        # (если нет, то он получатель) и само сообщение
+        # [message_info, ..]
         self.secret_p2p_chat = list()
         self.p2p_chat = list()
         self.secret_chat = list()
@@ -70,7 +102,7 @@ class Client:
         self.friendly_users = dict()  # id: Friend
         self.init_friends()
 
-        self.p2p_connected = dict()  # id: Friend -> set ids!!!!
+        self.p2p_connected = set()  # id's of connected friends
 
         self.server = Friend(public_address=server_hostname, sock=server_tcp_socket, client_id=0,
                              symmetric_key=server_symmetric_key)
@@ -79,11 +111,11 @@ class Client:
         self.id = USER_NOT_AUTHENTICATED  # не аутентифицирован
         self.lock = threading.Lock()
         self.thread_locals = threading.local()
-        self.thread_locals.users_database = ClientUserDatabase(need_client_init=True)
-        # self.thread_locals.message_database = ClientMessageDatabase(need_client_init=True)
         self.connector = Peer2PeerConnector(self)
         self.public_key = self.private_key = None
 
+        ClientUserDatabase(need_client_init=True)
+        #ClientMessageDatabase(need_client_init=True)
         key_init_thread = threading.Thread(target=self.init_keys)
         friend_init_thread = threading.Thread(target=self.init_friends)
         key_init_thread.start()
@@ -114,7 +146,8 @@ class Client:
         for friend in friend_generator:
             fid = friend[DB_COLUMN_NAME_FRIEND_ID]
             flogin = friend[DB_COLUMN_NAME_LOGIN]
-            self.friendly_users[fid] = Friend(client_id=fid, login=flogin)
+            fpublickey = self.thread_locals.users_database.get_friends_public_key(fid)
+            self.friendly_users[fid] = Friend(client_id=fid, login=flogin, public_asymmetric_key=fpublickey)
 
     def init_keys(self) -> None:
         """
@@ -170,7 +203,7 @@ class Client:
         Запрашиваем у сервера все переписки, прошедшие через него, секретные и обычные
         :return:
         """
-        message = Message(message_type=COMMAND)
+        message = Message(message_type=COMMAND, sender_id=self.id, receiver_id=SERVER_ID)
         for friend_id in self.friendly_users:
             message.message = f"{GET_MESSAGES} {friend_id}"
             send_message_to_client(self.server, message)
@@ -214,18 +247,21 @@ class Client:
             target = self.server
         self.thread_locals.message_database = ClientMessageDatabase()
         self.thread_locals.users_database = ClientUserDatabase()
+        self.thread_locals.message_manager = ReceivedMessageManager(self)
         try:
             while True:
                 message = get_message_from_client(target)
                 if not message:  # Что-то пошло не так и сервер отключился
                     break
-
+                self.thread_locals.message_manager.handle(message)
+                """
                 if message.message_type == COMMAND or message.message_type == BYTES_COMMAND:
                     self.command_handler(message)
                 elif message.message_type == MESSAGE or message.message_type == BYTES_MESSAGE:
                     self.message_handler(message)
                 else:
                     pass
+                """
         except Exception as e:
             print("Exception: {}".format(e.args))
             print(traceback.format_exc())
@@ -233,6 +269,7 @@ class Client:
         finally:
             pass
 
+    """
     def command_handler(self, message: Message) -> None:
         # message.message = 'command_type ...'
         data = message.message.split()
@@ -287,7 +324,8 @@ class Client:
             self.connector.stop_task()
             print("Пользователь сейчас не в сети")
         elif command == MESSAGE_FROM_DATABASE:
-            # data = [.., ]
+            self.message_manager.add_message(data)
+        elif command == MESSAGE_KEY_FROM_DATABASE:
             pass
         else:
             pass
@@ -295,21 +333,27 @@ class Client:
     def message_handler(self, message: Message) -> None:
         print("received from:\n", message.sender_id,
               "\nmessage:\n", message.message, sep="")
+    """
 
     def get_user_message(self, p2p=False, secret=False) -> None:
-        if not self.id:
+        if self.id == USER_NOT_AUTHENTICATED:
             print("Невозможно отправить сообщение. Сперва необходимо войти или зарегистрироваться")
             return
         sender_id = self.id
         receiver_id = ""
+
         while not receiver_id.isdigit():
             receiver_id = get_input("Введите id получателя:\n")
         receiver_id = int(receiver_id)
+
+        if secret and not self.friendly_users[receiver_id].symmetric_key:
+            self.symmetric_key_exchange_with_friend(receiver_id)
+
         if not p2p:
             target = self.server
         else:
             if receiver_id in self.p2p_connected:
-                target = self.p2p_connected[receiver_id]
+                target = self.friendly_users[receiver_id]
             else:
                 print("Подключение не установлено")
                 return
@@ -327,7 +371,7 @@ class Client:
         elif message_type == DELETE_USER:
             self.delete_account()
         elif message_type == ADD_FRIEND_BY_LOGIN:
-            self.add_friend_by_login()
+            self.add_friend()
         elif message_type == LOG_OUT:
             self.log_out()
         elif message_type == CREATE_P2P_CONNECTION:
@@ -366,25 +410,28 @@ class Client:
             elif user_input == 4:
                 self.get_user_message(p2p=True, secret=True)
 
-    def add_friend_by_login(self, friend_login: str = None) -> None:
+    def add_friend(self, friend_login: str = None, friend_id: int = None) -> None:
         """
-        Запрашиваем данные о клиенте с логином friend_login у сервера
+        Запрашиваем данные о клиенте с логином friend_login или id friend_id у сервера
         :param friend_login:
+        :param friend_id:
         :return:
         """
-        if not friend_login:
+        message = Message(message_type=BYTES_COMMAND, sender_id=self.id, receiver_id=SERVER_ID)
+        if not friend_login and not friend_id:
             friend_login = get_input("Введите логин\n")
-        if not friend_login:
-            return
-        message = Message(message_type=COMMAND)
-        message.message = f"{ADD_FRIEND_BY_LOGIN} {friend_login}"
+        if friend_id:
+            message.message = f"{ADD_FRIEND_BY_ID} {friend_id}"
+        elif friend_login:
+            message.message = f"{ADD_FRIEND_BY_LOGIN} {friend_login}"
+
         send_message_to_client(self.server, message)
 
     def log_in(self, auth_type: int) -> None:
         if self.id:
             print("Вы уже вошли")
             return
-        message = Message(message_type=BYTES_COMMAND, secret=True)
+        message = Message(message_type=BYTES_COMMAND, sender_id=self.id, receiver_id=SERVER_ID, secret=True)
         login = get_input("Введите логин\n")
         password = get_input("Введите пароль\n")
         if not login or not password:
@@ -396,24 +443,191 @@ class Client:
         send_message_to_client(self.server, message)
 
     def delete_account(self) -> None:
-        message = Message(message_type=COMMAND)
+        message = Message(message_type=COMMAND, sender_id=self.id, receiver_id=SERVER_ID)
         message.message = str(DELETE_USER)
         send_message_to_client(self.server, message)
         self.id = 0
         print("Пользователь удален")
 
     def log_out(self) -> None:
-        message = Message(message_type=COMMAND)
+        message = Message(message_type=COMMAND, sender_id=self.id, receiver_id=SERVER_ID)
         message.message = str(LOG_OUT)
         send_message_to_client(self.server, message)
         self.id = 0
         print("Вы вышли из системы, войдите или зарегистрируйтесь для продолжения")
 
-    def create_p2p_connection(self, user_id: int, creator: bool = True):
+    def create_p2p_connection(self, user_id: int, creator: bool = True) -> None:
         if user_id in self.p2p_connected:
             return
 
         self.connector.new_connection_task(user_id, initiator=creator)
+
+    def symmetric_key_exchange_with_friend(self, friend_id) -> None:
+        """
+        Создаем ключ, для секретноей переписки с другом (без разницы P2P или через сервер), шифруем его открыты ключом
+        друга и отсылаем ему через сервер
+        :param friend_id:
+        :return:
+        """
+        key = get_random_bytes(SYMMETRIC_KEY_LEN_IN_BYTES)
+        self.friendly_users[friend_id].symmetric_key = key
+        cipher_rsa = PKCS1_OAEP.new(self.friendly_users[friend_id].public_asymmetric_key)
+        key = cipher_rsa.encrypt(key)
+        message = Message(message_type=BYTES_COMMAND, secret=True, sender_id=self.id, receiver_id=SERVER_ID,
+                          message=get_bytes_string(f"{SYMMETRIC_KEY_EXCHANGE} {friend_id} ") + key)
+        send_message_to_client(self.server, message)
+
+
+class ReceivedMessageManager:
+    """
+    Класс для обработки входящих сообщений
+    Заполняет списки истории сообщений приходящих с сервера, расшифровывая секретные
+    Управляет остальными сообщениями все время работы клиента
+    """
+    def __init__(self, client: Client):
+        self.client = client
+
+        # session: key - для расшифровки секретных сообщений хранившихся в БД сервера
+        self.session_keys = dict()
+        self.message = namedtuple("message_info", "sender message")
+
+    def handle(self, message: Message):
+
+        if message.sender_id not in self.client.friendly_users:
+            self.client.add_friend(friend_id=message.sender_id)
+
+        if message.message_type == COMMAND or message.message_type == BYTES_COMMAND:
+            self.command_handler(message)
+        elif message.message_type == MESSAGE or message.message_type == BYTES_MESSAGE:
+            self.message_handler(message)
+        else:
+            pass
+
+    def command_handler(self, message: Message):
+        # message.message = 'command_type ...'
+        data = message.message.split()
+
+        command = int(data[0])
+        if command == REGISTRATION_SUCCESS or command == AUTHENTICATION_SUCCESS: # переработать, вынести в отдельную функцию
+            # data = [.., 'uid']
+            uid = int(data[1])
+            self.client.id = uid
+            print("Вход в систему успешно выполнен, id:", uid)
+            self.client.start_post_authentication_init()
+        elif command == USER_ALREADY_EXIST:  # переработать, вынести в отдельную функцию
+            print("Пользователь с таким логином уже существует")
+        elif command == NOT_AUTHENTICATED:
+            print("Невозможно выполнить запрос, сперва необходимо зарегистрироваться или войти")
+        elif command == WRONG_LOGIN:
+            print("Пользователя с таким логином не существует")
+        elif command == WRONG_PASSWORD:
+            print("Неверный пароль")
+        elif command == USER_NOT_EXIST:
+            print("Пользователь не найден")
+        elif command == FRIEND_DATA:
+            # data = [.., b'uid', b'login', b'public_key']
+            uid = int(data[1])
+            login = get_text_from_bytes_data(data[2])
+            friend = Friend(client_id=uid, login=login, public_asymmetric_key=data[3])
+            self.client.friendly_users[uid] = friend
+            self.client.thread_locals.users_database.add_friend(uid, login, data[3])
+            # Как только добавили кого-то в друзья, отправляем ему приветственное сообщение,
+            # чтоб он тоже добавил нас в друзья как только появится в сети
+            message = Message(message_type=MESSAGE, sender_id=self.client.id, receiver_id=uid,
+                              message=f"{CLIENT_HELLO_MESSAGE}")
+            send_message_to_client(self.client.server, message)
+            print("Пользователь найден, uid:", data[1])
+        elif command == P2P_CONNECTION_DATA:
+            # data = [..., 'P2P_CONNECTION_TYPE', peer_id', 'con_type'] or
+            # data = [..., 'P2P_ADDRESS', 'peer_id', 'public_ip', 'public_port', 'private_ip', 'private_port'] or
+            # data = [..., b'P2P_CONNECTION_SYMMETRIC_KEY', b'peer_id', b'symmetric_key']
+            command_type = int(data[1])
+            peer_id = int(data[2])
+
+            if self.client.connector.peer_data[0] is None:
+                # данный клиент не инициатор соединения, и не соединяется с другим клиентом
+                self.client.connector.new_connection_task(peer_id, False)
+
+            if self.client.connector.peer_data[0] == peer_id:  # получили данные от нужного пользователя
+                if command_type == P2P_CONNECTION_TYPE:
+                        self.client.connector.set_connection_type(int(data[3]))
+                elif command_type == P2P_ADDRESS:
+                        public_address = (data[3], int(data[4]))
+                        private_address = (data[5], int(data[6]))
+                        self.client.connector.set_connection_data(public_address, private_address)
+                elif command_type == SYMMETRIC_KEY_EXCHANGE:
+                        self.client.connector.set_symmetric_key(data[3])
+                else:
+                    pass
+        elif command == USER_OFFLINE:
+            self.client.connector.stop_task()
+            print("Пользователь сейчас не в сети")
+        elif command == MESSAGE_FROM_DATABASE or command == SECRET_MESSAGE_FROM_DATABASE:
+            self.add_message(data)
+        elif command == MESSAGE_KEY_FROM_DATABASE:
+            self.add_session_key(data)
+        elif command == ALL_MESSAGES_SENDED:
+            self.clear()
+        elif command == SYMMETRIC_KEY_EXCHANGE:
+            # data = [.., b'friend_id', b'key']
+            friend_id = int(data[1])
+            self.client.friendly_users[friend_id].symmetric_key = data[2]
+        else:
+            pass
+
+    def message_handler(self, message: Message):
+        print("received from:\n", message.sender_id,
+              "\nmessage:\n", message.message, sep="")
+
+    def add_session_key(self, session_key_info: list) -> None:
+        # session_key_info = [..., b'session_id', b'key']
+        session_id = int(session_key_info[1])
+        key = RSA_decrypt(self.client.private_key, session_key_info[2])
+        self.session_keys[session_id] = key
+
+    def add_message(self, message_info: list) -> None:
+        """
+        Добавляет сообщения пришедшие из БД сервера в список сообщений пользователя
+        :param message_info: [b'type', b'sender', b'receiver'[, b'session_id'], b'message'[, b'tag', b'nonce']] -
+                                список данных о сообщении пришедшем с сервера
+        :return:
+        """
+        is_secret = (int(message_info[0]) == SECRET_MESSAGE_FROM_DATABASE)
+        sender_id = int(message_info[1])
+        receiver_id = int(message_info[2])
+
+        if self.client.id == sender_id:
+            friend_id = receiver_id
+            sender = True
+        else:
+            friend_id = sender_id
+            sender = False
+
+        if is_secret:
+            session_id = message_info[3]
+            message_pos = 4
+            message = message_info[message_pos]
+            tag = message_info[5]
+            nonce = message_info[6]
+            message = get_decrypted_message(message, self.session_keys[session_id], tag, nonce)
+        else:
+            message_pos = 3
+            message = message_info[message_pos]
+
+        message = self.message._make((sender, get_text_from_bytes_data(message)))
+
+        if is_secret:
+            self.client.friendly_users[friend_id].secret_chat.append(message)
+        else:
+            self.client.friendly_users[friend_id].chat.append(message)
+
+    def clear(self) -> None:
+        """
+        удаляем ненужные атрибуты из памяти после получения сообщений с БД сервера.
+        Удаляем session_keys, cipher_rsa
+        :return:
+        """
+        del self.session_keys
 
 
 class Peer2PeerConnector:
@@ -421,39 +635,18 @@ class Peer2PeerConnector:
     def __init__(self, peer: Client):
         self.client = peer
         self.client_initiator = False
-        self.peer_data_items_count = 5
-        # id, connection_type, public_address, private_address, symmetric_key
+        self.peer_data_items_count = 4
+        # id, connection_type, public_address, private_address
         self.peer_data = [None for _ in range(self.peer_data_items_count)]
 
         self.connection_type_stated = False
         self.connection_data_stated = False
-        self.symmetric_key_stated = False
         self.task_in_process = False
         self.max_connection_attempts = 5
 
     def run_task(self) -> None:
-        message = Message(sender_id=self.client.id)
+        message = Message(message_type=COMMAND, sender_id=self.client.id, receiver_id=SERVER_ID)
         command = CREATE_P2P_CONNECTION
-
-        message.message_type = BYTES_COMMAND
-        message.secret = True
-
-        # Устанавливаем общий ключ
-        command_type = P2P_CONNECTION_SYMMETRIC_KEY
-        if self.client_initiator:
-            print("key:", self.peer_data[4])
-            message.message = get_bytes_string("{} {} {} ".format(command, command_type, self.peer_data[0])) + \
-                              self.peer_data[4]
-            send_message_to_client(self.client.server, message)
-
-        while not self.symmetric_key_stated and self.task_in_process:
-            pass
-
-        if not self.task_in_process:
-            return
-
-        message.message_type = COMMAND
-        message.secret = False
 
         # Выбираем тип соединения
         command_type = P2P_CONNECTION_TYPE
@@ -503,12 +696,9 @@ class Peer2PeerConnector:
         if not can_start_new_connection:
             return False
 
-        # id, connection_type, public_address, private_address, symmetric_key
+        # id, connection_type, public_address, private_address
         self.peer_data = [None for _ in range(self.peer_data_items_count)]
         self.peer_data[0] = id_to_connect
-        if initiator:
-            self.peer_data[4] = get_random_bytes(SYMMETRIC_KEY_LEN_IN_BYTES)
-            self.symmetric_key_stated = True
         self.client_initiator = initiator
         new_task = threading.Thread(target=self.run_task)
         new_task.start()
@@ -519,10 +709,6 @@ class Peer2PeerConnector:
         if connection_type == P2P_TCP and self.client.p2p_tcp_connection_possible:
             self.peer_data[1] = P2P_TCP
         self.connection_type_stated = True
-
-    def set_symmetric_key(self, symmetric_key: bytes) -> None:
-        self.peer_data[4] = symmetric_key
-        self.symmetric_key_stated = True
 
     def stop_task(self) -> None:
         self.task_in_process = False
@@ -592,11 +778,12 @@ class Peer2PeerConnector:
                     final_socket = public_connector
 
             if final_socket:
-                self.client.p2p_connected[self.peer_data[0]] = Friend(client_id=self.peer_data[0],
-                                                                      private_address=peer_private_address,
-                                                                      public_address=peer_public_address,
-                                                                      sock=final_socket,
-                                                                      symmetric_key=self.peer_data[4])
+                connected_id = self.peer_data[0]
+                connected_peer = self.client.friendly_users[connected_id]
+                connected_peer.private_address = peer_private_address
+                connected_peer.public_address = peer_public_address
+                connected_peer.sock = final_socket
+                self.client.p2p_connected.add(connected_id)
                 connection_done = True
 
             if connection_done:  # если подключение установилось завершаем цикл
@@ -604,7 +791,7 @@ class Peer2PeerConnector:
 
         if connection_done:
             print("connected", final_socket)
-            peer = self.client.p2p_connected[self.peer_data[0]]
+            peer = self.client.friendly_users[self.peer_data[0]]
             new_peer_handler = threading.Thread(target=self.client.server_handler, args=(peer,))
             new_peer_handler.start()
 

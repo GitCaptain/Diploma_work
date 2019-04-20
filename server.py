@@ -37,7 +37,8 @@ class Server:
         data = message.message.split()
         command = int(data[0])
         if not self.thread_locals.user_authenticated and command != LOG_IN and command != REGISTER_USER:
-            message = Message(message_type=COMMAND, message=str(NOT_AUTHENTICATED))
+            message = Message(message_type=COMMAND, sender_id=self.id, receiver_id=ID_ERROR,
+                              message=str(NOT_AUTHENTICATED))
             send_message_to_client(user, message)
             return False
         if command == REGISTER_USER:
@@ -60,53 +61,65 @@ class Server:
             user.id = 0
             return True
         elif command == ADD_FRIEND_BY_LOGIN:  # переработать, вынести в отдельную функцию
-            # data = [..., 'login']
-            login = data[1]
-            user = self.thread_locals.users_database.get_client_by_login(login)
-            message = Message()
-            if user == DB_USER_NOT_EXIST:
-                message.message_type = COMMAND
-                message.message = str(USER_NOT_EXIST)
-            else:
-                message.message_type = BYTES_COMMAND
-                message.message = get_bytes_string(f"{FRIEND_DATA} {user[DB_COLUMN_NAME_USER_ID]} "
-                                                   f"{user[DB_COLUMN_NAME_USER_LOGIN]} ") + \
-                                  user[DB_COLUMN_NAME_USER_PUBLIC_KEY]
-            send_message_to_client(user, message)
+            # data = [..., b'login']
+            self.send_client_data(user, data[1])
         elif command == CREATE_P2P_CONNECTION:
             # data = [..., 'P2P_CONNECTION_TYPE', 'peer_id','con_type'] or
-            # data = [..., 'P2P_ADDRESS', 'peer_id', 'private_ip', 'private_port'] or
-            # data = [..., b'P2P_CONNECTION_SYMMETRIC_KEY', b'peer_id', b'symmetric_key']
+            # data = [..., 'P2P_ADDRESS', 'peer_id', 'private_ip', 'private_port']
+
             command_type = int(data[1])
             second_peer_id = int(data[2])
-            message = Message(message_type=COMMAND, receiver_id=user.id)
+            message = Message(message_type=COMMAND, sender_id=self.id, receiver_id=user.id)
             if second_peer_id not in self.authenticated_users:
                 message.message = str(USER_OFFLINE)
                 send_message_to_client(user, message)
                 return False
             second_peer = self.authenticated_users[second_peer_id]
 
-            message = Message(receiver_id=second_peer.id)
+            message = Message(message_type=COMMAND, sender_id=self.id, receiver_id=second_peer.id)
             command_to_peer = P2P_CONNECTION_DATA
             if command_type == P2P_ADDRESS:
-                message.message_type = COMMAND
                 user_private_address = data[3], int(data[4])
                 message.message = "{} {} {} {} {} {} {}".format(command_to_peer, command_type, user.id,
                                                                 *user.public_address, *user_private_address)
             elif command_type == P2P_CONNECTION_TYPE:
-                message.message_type = COMMAND
                 message.message = "{} {} {} {}".format(command_to_peer, command_type, user.id, data[3])
-            elif command_type == P2P_CONNECTION_SYMMETRIC_KEY:
-                message.message_type = BYTES_COMMAND
-                message.message = get_bytes_string("{} {} {} ".format(command_to_peer, command_type, user.id)) + data[3]
             send_message_to_client(second_peer, message)
         elif command == GET_MESSAGES:
             # data = [.., 'users_friend_id']
             users_friend_id = int(data[1])
             self.send_usual_message_history(user, users_friend_id)
             self.send_encrypted_message_history(user, users_friend_id)
+            send_message_to_client(user, Message(message_type=COMMAND, sender_id=self.id, receiver_id=user.id,
+                                                 message=str(ALL_MESSAGES_SENDED)))
+        elif command == SYMMETRIC_KEY_EXCHANGE:
+            # data = [..., b'peer_id', b'symmetric_key']
+            receiver = self.authenticated_users[int(data[1])]
+            message = Message(message_type=BYTES_COMMAND, receiver_id=receiver.id, sender_id=SERVER_ID)
+            message.message = get_bytes_string(f"{SYMMETRIC_KEY_EXCHANGE} {user.id} ") + data[2]
+            send_message_to_client(receiver, message)
         else:
             pass
+
+    def send_client_data(self, user: User, login: bytes) -> None:
+        """
+        Отправляем данные клиенту user о клиенте с логином login и наоборот
+        :param user:
+        :param login:
+        :return:
+        """
+        friend_data = self.thread_locals.users_database.get_client_by_login(login)
+
+        if friend_data == DB_USER_NOT_EXIST:
+            message_to_user = Message(message_type=COMMAND, sender_id=self.id, receiver_id=user.id)
+            message_to_user.message = str(USER_NOT_EXIST)
+        else:
+            message_to_user = Message(message_type=BYTES_COMMAND, sender_id=self.id, receiver_id=user.id)
+            message_to_user.message = get_bytes_string(f"{FRIEND_DATA} {friend_data[DB_COLUMN_NAME_USER_ID]} "
+                                                       f"{friend_data[DB_COLUMN_NAME_USER_LOGIN]} ") \
+                                      + friend_data[DB_COLUMN_NAME_USER_PUBLIC_KEY]
+
+        send_message_to_client(user, message_to_user)
 
     def send_usual_message_history(self, user: User, users_friend_id: int) -> None:
         """
@@ -116,7 +129,7 @@ class Server:
         :return:
         """
         message_generator = self.thread_locals.messages_database.get_message_history(user.id, users_friend_id)
-        message = Message(message_type=BYTES_COMMAND)
+        message = Message(message_type=BYTES_COMMAND, sender_id=self.id, receiver_id=user.id)
         for db_mes in message_generator:  # db_mes = (from: int, to: int, mes: bytes)
             message.message = get_bytes_string(f"{MESSAGE_FROM_DATABASE} "
                                                f"{db_mes[DB_COLUMN_NAME_SENDER_ID]} "
@@ -132,21 +145,21 @@ class Server:
         :return:
         """
         message_generator = self.thread_locals.messages_database.get_message_history(user.id, users_friend_id, True)
-        session = -1  # несуществующая сессия
-        message = Message(message_type=BYTES_COMMAND)
+        session_id = -1  # несуществующая сессия
+        message = Message(message_type=BYTES_COMMAND, sender_id=self.id, receiver_id=user.id)
         for db_mes in message_generator:  # db_mes = (ses_id:int, from:int, to:int, mes:bytes, tag:bytes, nonce:bytes)
-            if db_mes[DB_TABLE_NAME_SESSION_ID] != session:
-                mes = Message(message_type=BYTES_COMMAND)
-                session = db_mes[DB_TABLE_NAME_SESSION_ID]
-                session_key = self.thread_locals.messages_database.get_session_key(session, user.id, users_friend_id)
+            if db_mes[DB_TABLE_NAME_SESSION_ID] != session_id:
+                mes = Message(message_type=BYTES_COMMAND, sender_id=self.id, receiver_id=user.id)
+                session_id = db_mes[DB_TABLE_NAME_SESSION_ID]
+                session_key = self.thread_locals.messages_database.get_session_key(session_id, user.id, users_friend_id)
                 if user.id < users_friend_id:
                     session_key = session_key[0]
                 else:
                     session_key = session_key[1]
-                mes.message = get_bytes_string(f"{MESSAGE_KEY_FROM_DATABASE} ") + session_key
+                mes.message = get_bytes_string(f"{MESSAGE_KEY_FROM_DATABASE} {session_id} ") + session_key
                 send_message_to_client(user, mes)
-            message.message = get_bytes_string(f"{MESSAGE_FROM_DATABASE} {db_mes[DB_COLUMN_NAME_SENDER_ID]} "
-                                               f"{db_mes[DB_COLUMN_NAME_RECEIVER_ID]} ") \
+            message.message = get_bytes_string(f"{SECRET_MESSAGE_FROM_DATABASE} {db_mes[DB_COLUMN_NAME_SENDER_ID]} "
+                                               f"{db_mes[DB_COLUMN_NAME_RECEIVER_ID]} {session_id} ") \
                               + db_mes[DB_COLUMN_NAME_MESSAGE] + b' '\
                               + db_mes[DB_COLUMN_NAME_MESSAGE_TAG] + b' '\
                               + db_mes[DB_COLUMN_NAME_MESSAGE_NONCE]
@@ -170,12 +183,13 @@ class Server:
                                                          saltl, saltr, public_key)
         self.lock.release()
 
-        response_message = Message(message_type=COMMAND, sender_id=self.id)
+        response_message = Message(message_type=COMMAND, sender_id=self.id, receiver_id=ID_ERROR)
         if uid == DB_USER_ALREADY_EXIST:
             response_message.message = str(USER_ALREADY_EXIST)
             send_message_to_client(user, response_message)
             return False
         user.id = uid
+        response_message.receiver_id = uid
         self.thread_locals.user_authenticated = True
         self.authenticated_users[user.id] = user
         response_message.message = f"{REGISTRATION_SUCCESS} {uid}"
@@ -193,7 +207,7 @@ class Server:
         saltl, saltr = self.thread_locals.users_database.get_salt_by_login(login)
         uid = self.thread_locals.users_database.check_client_authentication_data(login,
                                                                                  get_hash(password, saltl, saltr))
-        response_message = Message(message_type=COMMAND, sender_id=self.id)
+        response_message = Message(message_type=COMMAND, sender_id=self.id, receiver_id=ID_ERROR)
         if uid == DB_WRONG_LOGIN:
             response_message.message = str(WRONG_LOGIN)
             send_message_to_client(user, response_message)
@@ -203,6 +217,7 @@ class Server:
             send_message_to_client(user, response_message)
             return False
         user.id = uid
+        response_message.receiver_id = uid
         self.thread_locals.user_authenticated = True
         self.authenticated_users[user.id] = user
         response_message.message = f"{AUTHENTICATION_SUCCESS} {uid}"
@@ -307,7 +322,8 @@ class Server:
             secure_connected_socket = secure_context.wrap_socket(connected_socket, server_side=True)
             symmetric_key = get_random_bytes(SYMMETRIC_KEY_LEN_IN_BYTES)
             send_message_to_client(User(sock=secure_connected_socket, symmetric_key=AUTH_NOT_SECRET_KEY),
-                                   message=Message(message_type=COMMAND, message=symmetric_key))
+                                   message=Message(message_type=COMMAND, sender_id=self.id, receiver_id=ID_ERROR,
+                                                   message=symmetric_key))
             connected_socket = secure_connected_socket.unwrap()
 
             user = User(sock=connected_socket, public_address=connected_addres, symmetric_key=symmetric_key)

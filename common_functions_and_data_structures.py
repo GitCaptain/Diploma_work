@@ -23,8 +23,8 @@ class Message:
     """
     Структура содержащая данные о сообщении
     """
-    def __init__(self, message_type: int = None, receiver_id: int = 0, sender_id: int = 0, length: int = 0,
-                 message: (bytes, str) = "", secret: bool = False, message_tag: bytes = b'', message_nonce: bytes = b''):
+    def __init__(self, message_type: int, receiver_id: int, sender_id: int, length: int = 0, message: (bytes, str) = "",
+                 secret: bool = False, message_tag: bytes = b'', message_nonce: bytes = b''):
         self.message_type = message_type
         self.receiver_id = receiver_id
         self.length = length
@@ -36,6 +36,9 @@ class Message:
 
     def __bool__(self):
         return bool(self.message)
+
+
+BROKEN_MESSAGE = Message(message_type=MESSAGE_ERROR, sender_id=ID_ERROR, receiver_id=ID_ERROR)
 
 
 def get_hash(string: bytes, saltl: bytes = b'', saltr: bytes = b'', hash_func=SHA256) -> bytes:
@@ -51,6 +54,13 @@ def get_hash(string: bytes, saltl: bytes = b'', saltr: bytes = b'', hash_func=SH
 
 
 def get_encrypted_message(message: bytes, key: bytes, need_encrypt: bool = False) -> (bytes, bytes, bytes):
+    """
+    Подписывает или зашифровывает сообщение
+    :param message:
+    :param key:
+    :param need_encrypt: нужно ли шифровать сообщение
+    :return: Подписанное (зашифрованное) сообщение, tag и nonce, нужные для проверки подлинности сообщения получателем
+    """
     if need_encrypt:
         # nonce - a value that must never be reused for any other encryption done with this key.
         # For MODE_EAX, there are no restrictions on its length (recommended: 16 bytes).
@@ -66,28 +76,36 @@ def get_encrypted_message(message: bytes, key: bytes, need_encrypt: bool = False
     return ciphertext, tag, nonce
 
 
-def get_decrypted_message(message: Message, key: bytes, need_decrypt: bool = False) -> Message:
+def get_decrypted_message(message: bytes, key: bytes, tag: bytes, nonce: bytes, need_decrypt: bool = False) -> bytes:
+    """
+    Проверяет подпись и при необходимости расшифровывает сообщение
+    :param message:
+    :param key:
+    :param tag:
+    :param nonce:
+    :param need_decrypt: Нужно ли расшифровывать сообщение
+    :return: Расшифрованное (проверенное) сообщение, или сообщение об ошибке
+    """
     try:
         if need_decrypt:
-            cipher = AES.new(key, AES.MODE_EAX, message.nonce)
-            message.message = cipher.decrypt_and_verify(message.message, message.tag)
+            cipher = AES.new(key, AES.MODE_EAX, nonce)
+            message = cipher.decrypt_and_verify(message, tag)
         else:
             mac = HMAC.new(key, digestmod=SHA256)
-            mac.update(message.message)
-            mac.verify(message.tag)
+            mac.update(message)
+            mac.verify(tag)
     except ValueError:  # Сообщение повреждено при передаче
-        mes = b'Message corrupted during transmission'
-        return Message(message_type=message.message_type,
-                       message=mes,
-                       receiver_id=message.receiver_id,
-                       sender_id=message.sender_id,
-                       length=len(mes),
-                       secret=False)
+        return b'Message corrupted during transmission'
     return message
 
 
 def get_message_from_client(user: User, server: bool = False) -> Message:
-
+    """
+    Получаем сообщение от user'a
+    :param user:
+    :param server:
+    :return: полученное сообщение
+    """
     # служебное сообщение, с данными о клиентсвом сообщении
     # message_data = b'message_type message_length receiver_id sender_id secret tag_length nonce_length'
     # После него получаем message, tag, nonce
@@ -102,7 +120,7 @@ def get_message_from_client(user: User, server: bool = False) -> Message:
             break
 
     if not message_data:  # Клиент отключился
-        return Message()
+        return BROKEN_MESSAGE
 
     message_data = message_data.split()
 
@@ -138,14 +156,15 @@ def get_message_from_client(user: User, server: bool = False) -> Message:
                       message_tag=tag,
                       message_nonce=nonce)
 
-    if server and message_type == MESSAGE:
-        # сообщение нужно просто добавить в БД и переслать (не расшифровывая)
+    if server and message_type == MESSAGE and secret:
+        # сообщение нужно просто добавить в БД и переслать(не расшифровывая и не проверяя подпись, т.к. ключ неизвестен)
         pass
     else:
-        message = get_decrypted_message(message, user.symmetric_key, message.secret)
+        message.message = get_decrypted_message(message.message, user.symmetric_key, message.tag, message.nonce,
+                                                message.secret)
 
     #  Получили данные, которые нужно преобразовывать в строку
-    if not message.message_type == BYTES_COMMAND and not message.message_type == BYTES_MESSAGE:
+    if not server or message_type == COMMAND:
         message.message = get_text_from_bytes_data(message.message)
 
     """
@@ -155,7 +174,13 @@ def get_message_from_client(user: User, server: bool = False) -> Message:
     return message
 
 
-def get_prepared_message(message: Message, symmetric_key: bytes) -> (bytes, bytes):
+def get_prepared_message(message: Message, symmetric_key: bytes) -> (bytes, bytes, bytes, bytes):
+    """
+    Подготавливает сообщение к отправке, внося все необходимые данные
+    :param message:
+    :param symmetric_key:
+    :return: Данные о сообщении (отправляются перед сообщением), зашифрованное (подписанное сообщение), его tag и nonce
+    """
     message.message = get_bytes_string(message.message)
 
     message.message, tag, nonce = get_encrypted_message(message.message, symmetric_key, need_encrypt=message.secret)
@@ -197,6 +222,12 @@ def get_prepared_message(message: Message, symmetric_key: bytes) -> (bytes, byte
 
 
 def send_message_to_client(receiver: User, message: Message) -> None:
+    """
+    Отправляет сообщение клиенту
+    :param receiver:
+    :param message:
+    :return:
+    """
     message_data, message, tag, nonce = get_prepared_message(message, receiver.symmetric_key)
     if not receiver.socket or not message_data:
         return
@@ -207,7 +238,12 @@ def send_message_to_client(receiver: User, message: Message) -> None:
     receiver.socket.sendall(nonce)
 
 
-def get_bytes_string(string: str) -> bytes:
+def get_bytes_string(string: str or bytes or memoryview) -> bytes:
+    """
+    Возвращает string преобразованный в bytes
+    :param string:
+    :return:
+    """
     if isinstance(string, memoryview):  # если вдруг пришли memoryview (например из БД пришли ключи)
         return bytes(string)
     if isinstance(string, bytes):  # если вдруг пришли сразу байты (например ключ шифрования)
@@ -216,6 +252,11 @@ def get_bytes_string(string: str) -> bytes:
 
 
 def get_text_from_bytes_data(data: bytes) -> str:
+    """
+    Возвращает строку в кодировке ENCODING полученную из data
+    :param data:
+    :return:
+    """
     return data.decode(ENCODING)
 
 

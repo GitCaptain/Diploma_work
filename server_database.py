@@ -400,6 +400,20 @@ class ServerUserDatabase(UserDatabase):
             return user
         return DB_USER_NOT_EXIST
 
+    def get_client_login_by_id(self, uid: int) -> int or bytes:
+        """
+        :param uid:
+        :return: login клиента с id = uid, если такой существует, иначе DB_USER_NOT_EXIST
+        """
+        self.cursor.execute(f"SELECT {DB_COLUMN_NAME_USER_LOGIN} "
+                            f"FROM {DB_TABLE_NAME_USER_LIST} "
+                            f"WHERE {DB_COLUMN_NAME_USER_ID}=:id;",
+                            {"id": uid})
+        login = self.cursor.fetchone()
+        if login:
+            return login[DB_COLUMN_NAME_USER_LOGIN]
+        return DB_USER_NOT_EXIST
+
     def get_salt_by_login(self, login: bytes) -> (bytes, bytes):
         """
         Возвращаем соль, использованную при регистрации пользователя с логином login и добавлении его в БД.
@@ -416,3 +430,18 @@ class ServerUserDatabase(UserDatabase):
         if not salts:
             salts = b'', b''
         return salts
+
+    def get_client_public_key_by_id(self, uid: int) -> bytes:
+        """
+        Возвращаем публичный ключ пользователя
+        :param uid:
+        :return: публичный ключ пользователя, если такой существует, иначе DB_USER_NOT_EXIST
+        """
+        self.cursor.execute(f"SELECT {DB_COLUMN_NAME_USER_PUBLIC_KEY} "
+                            f"FROM {DB_TABLE_NAME_USER_LIST} "
+                            f"WHERE {DB_COLUMN_NAME_USER_ID}=:id;",
+                            {"id": uid})
+        pk = self.cursor.fetchone()
+        if pk:
+            return pk[DB_COLUMN_NAME_USER_PUBLIC_KEY]
+        return DB_USER_NOT_EXIST
