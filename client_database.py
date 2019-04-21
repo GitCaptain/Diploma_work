@@ -2,9 +2,9 @@ from database import *
 
 
 DB_FOLDER = "data"
-DB_NAME_USERS = "users_database.sqlite"
+DB_NAME_USERS = "client_users_database.sqlite"
 DB_PATH_USERS = DB_FOLDER + os.sep + DB_NAME_USERS
-DB_NAME_MESSAGE = "messages_database.sqlite"
+DB_NAME_MESSAGE = "client_messages_database.sqlite"
 DB_PATH_MESSAGE = DB_FOLDER + os.sep + DB_NAME_MESSAGE
 
 DB_TABLE_NAME_FRIEND_LIST = "friend_list"
@@ -21,6 +21,8 @@ DB_COLUMN_PROPERTY_TEXT = "TEXT"
 DB_COLUMN_PROPERTY_INTEGER = "INTEGER"
 DB_COLUMN_PROPERTY_NOT_NULL = "NOT NULL"
 DB_COLUMN_PROPERTY_PRIMARY_KEY = "PRIMARY KEY"
+
+DB_GET_EVERYTHING = '*'
 
 
 class ClientMessageDatabase(MessageDatabase):
@@ -63,7 +65,7 @@ class ClientMessageDatabase(MessageDatabase):
         if message_secret:
             tb_name += f" {DB_SUFFIX_SECRET_MESSAGES}"
         if not self.check_if_table_exist(table_name=tb_name):
-            self.create_message_table(tb_name)
+            self.create_message_table(table_name=tb_name)
         row_values = (message_received, message)
         self.insert_into_table(tb_name, row_values)
 
@@ -77,7 +79,7 @@ class ClientMessageDatabase(MessageDatabase):
         tb_name = f"{friend_id}"
         if get_secret:
             tb_name += f" {DB_SUFFIX_SECRET_MESSAGES}"
-        self.cursor.execute("SELECT * FROM :tb_name;", {"tb_name": tb_name})
+        self.cursor.execute(f"SELECT {DB_GET_EVERYTHING} FROM {tb_name};")
         result = self.cursor.fetchone()
         while result:
             yield result
@@ -100,7 +102,8 @@ class ClientUserDatabase(UserDatabase):
         :return:
         """
         tb_name = DB_TABLE_NAME_FRIEND_LIST
-        columns = (f"{DB_COLUMN_NAME_FRIEND_ID} {DB_COLUMN_PROPERTY_INTEGER} {DB_COLUMN_PROPERTY_NOT_NULL}",
+        columns = (f"{DB_COLUMN_NAME_FRIEND_ID} {DB_COLUMN_PROPERTY_INTEGER} {DB_COLUMN_PROPERTY_NOT_NULL} "
+                   f"{DB_COLUMN_PROPERTY_PRIMARY_KEY}",
                    f"{DB_COLUMN_NAME_LOGIN} {DB_COLUMN_PROPERTY_TEXT} {DB_COLUMN_PROPERTY_NOT_NULL}",
                    f"{DB_COLUMN_NAME_FRIEND_PUBLIC_KEY} {DB_COLUMN_PROPERTY_TEXT} {DB_COLUMN_PROPERTY_NOT_NULL}")
         self.create_table_if_not_exist(tb_name, columns)
@@ -132,7 +135,7 @@ class ClientUserDatabase(UserDatabase):
         Получаем список друзей пользоваетеля, без их публичных ключей, т.к. они нужны в другом месте
         :return: sql.Row объект с информацией о друге
         """
-        execute_str = f"SELECT {DB_COLUMN_NAME_FRIEND_ID}, {DB_COLUMN_NAME_LOGIN}" \
+        execute_str = f"SELECT {DB_COLUMN_NAME_FRIEND_ID}, {DB_COLUMN_NAME_LOGIN} " \
                       f"FROM {DB_TABLE_NAME_FRIEND_LIST};"
         self.cursor.execute(execute_str)
         result = self.cursor.fetchone()

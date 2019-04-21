@@ -11,8 +11,9 @@ SYMMETRIC_KEY_LEN_IN_BYTES = 32  # 256 bit length key is enough
 AES_NONCE_LENGTH_IN_BYTES = 16
 RSA_KEY_LEN_IN_BITS = 2048
 
-# ключ известный всем на свете, костыль нужный для аутентификации пользователя и сервера, во время ssl соединения
-AUTH_NOT_SECRET_KEY = b'sixteen byte key'
+# ключ известный всем на свете, костыль нужный для аутентификации пользователя и сервера, во время ssl соединения,
+# а также для подписи не секретных сообщений, т.к. симметричный ключ может быть не установлен, между парой пользователей
+NOT_SECRET_KEY = b'sixteen byte key'
 
 
 # database consts (<=0)
@@ -39,6 +40,8 @@ LOG_OUT = 6
 GET_MESSAGES = 7
 CREATE_P2P_CONNECTION = 8
 CLIENT_HELLO_MESSAGE = 9
+SESSION_ENCRYPTED_KEY = 10
+SYMMETRIC_KEY_EXCHANGE = 11
 
 # Server response
 WRONG_LOGIN = 1
@@ -58,8 +61,9 @@ P2P_CONNECTION_TYPE = 12
 P2P_ADDRESS = 13
 P2P_CONNECTION_DATA = 14
 
-SYMMETRIC_KEY_EXCHANGE = 15
+SYMMETRIC_KEY = 15
 MESSAGE_FROM_DATABASE = 16
 MESSAGE_KEY_FROM_DATABASE = 17
 SECRET_MESSAGE_FROM_DATABASE = 18
 ALL_MESSAGES_SENDED = 19
+GET_SESSION_KEY = 20

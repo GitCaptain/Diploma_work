@@ -15,8 +15,6 @@ class User:
         self.id = client_id
         self.public_address = public_address
         self.symmetric_key = symmetric_key
-        # для каждого секретного чата с другим id хранится номер сессии этого секретного чата id: session_id
-        self.session_ids = dict()
 
 
 class Message:
@@ -24,7 +22,8 @@ class Message:
     Структура содержащая данные о сообщении
     """
     def __init__(self, message_type: int, receiver_id: int, sender_id: int, length: int = 0, message: (bytes, str) = "",
-                 secret: bool = False, message_tag: bytes = b'', message_nonce: bytes = b''):
+                 secret: bool = False, message_tag: bytes = b'', message_nonce: bytes = b'',
+                 secret_session_id: int = 0):
         self.message_type = message_type
         self.receiver_id = receiver_id
         self.length = length
@@ -33,6 +32,7 @@ class Message:
         self.secret = secret
         self.tag = message_tag
         self.nonce = message_nonce
+        self.secret_session_id = secret_session_id
 
     def __bool__(self):
         return bool(self.message)
@@ -107,7 +107,7 @@ def get_message_from_client(user: User, server: bool = False) -> Message:
     :return: полученное сообщение
     """
     # служебное сообщение, с данными о клиентсвом сообщении
-    # message_data = b'message_type message_length receiver_id sender_id secret tag_length nonce_length'
+    # message_data = b'message_type message_length receiver_id sender_id secret tag_length nonce_length secret_sess_id'
     # После него получаем message, tag, nonce
     message_data = b""
     while True:
@@ -131,6 +131,7 @@ def get_message_from_client(user: User, server: bool = False) -> Message:
     secret = int(message_data[4])
     tag_length = int(message_data[5])
     nonce_length = int(message_data[6])
+    secret_session_id = int(message_data[7])
 
     def recv_message(length):
         b_message = b""
@@ -154,18 +155,8 @@ def get_message_from_client(user: User, server: bool = False) -> Message:
                       message=b_message,
                       secret=bool(secret),
                       message_tag=tag,
-                      message_nonce=nonce)
-
-    if server and message_type == MESSAGE and secret:
-        # сообщение нужно просто добавить в БД и переслать(не расшифровывая и не проверяя подпись, т.к. ключ неизвестен)
-        pass
-    else:
-        message.message = get_decrypted_message(message.message, user.symmetric_key, message.tag, message.nonce,
-                                                message.secret)
-
-    #  Получили данные, которые нужно преобразовывать в строку
-    if not server or message_type == COMMAND:
-        message.message = get_text_from_bytes_data(message.message)
+                      message_nonce=nonce,
+                      secret_session_id=secret_session_id)
 
     """
     if server:
@@ -186,20 +177,14 @@ def get_prepared_message(message: Message, symmetric_key: bytes) -> (bytes, byte
     message.message, tag, nonce = get_encrypted_message(message.message, symmetric_key, need_encrypt=message.secret)
 
     message.length = len(message.message)
-    message_data_str = "{message_type} " \
-                       "{message_length} " \
-                       "{receiver_id} " \
-                       "{sender_id} " \
-                       "{secret} " \
-                       "{tag_length} " \
-                       "{nonce_length}"\
-        .format(message_type=message.message_type,
-                message_length=message.length,
-                receiver_id=message.receiver_id,
-                sender_id=message.sender_id,
-                secret=int(message.secret),
-                tag_length=len(tag),
-                nonce_length=len(nonce))
+    message_data_str = f"{message.message_type} " \
+                       f"{message.length} " \
+                       f"{message.receiver_id} " \
+                       f"{message.sender_id} " \
+                       f"{int(message.secret)} " \
+                       f"{len(tag)} " \
+                       f"{len(nonce)} " \
+                       f"{message.secret_session_id}"
 
     step = MESSAGE_DATA_SIZE-1
     message_data = []
@@ -221,14 +206,16 @@ def get_prepared_message(message: Message, symmetric_key: bytes) -> (bytes, byte
     return message_data, message.message, tag, nonce
 
 
-def send_message_to_client(receiver: User, message: Message) -> None:
+def send_message_to_client(receiver: User, message: Message, key: bytes) -> None:
     """
     Отправляет сообщение клиенту
     :param receiver:
     :param message:
+    :param key: симметричный ключ, известный отправителю и КОНЕЧНОМУ получателю
+    (т.е. не серверу, а именно конечному клиенту, если это не сервер)
     :return:
     """
-    message_data, message, tag, nonce = get_prepared_message(message, receiver.symmetric_key)
+    message_data, message, tag, nonce = get_prepared_message(message, key)
     if not receiver.socket or not message_data:
         return
     for data_part in message_data:

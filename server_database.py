@@ -3,9 +3,9 @@ from constants import DB_USER_NOT_EXIST, DB_WRONG_LOGIN, DB_USER_ALREADY_EXIST, 
 
 
 DB_FOLDER = "data"
-DB_NAME_USERS = "users_database.sqlite"
+DB_NAME_USERS = "server_users_database.sqlite"
 DB_PATH_USERS = DB_FOLDER + os.sep + DB_NAME_USERS
-DB_NAME_MESSAGE = "messages_database.sqlite"
+DB_NAME_MESSAGE = "server_messages_database.sqlite"
 DB_PATH_MESSAGE = DB_FOLDER + os.sep + DB_NAME_MESSAGE
 
 DB_TABLE_NAME_USER_LIST = "user_list"
@@ -35,6 +35,8 @@ DB_COLUMN_PROPERTY_TEXT = "TEXT"
 DB_COLUMN_PROPERTY_INTEGER = "INTEGER"
 DB_COLUMN_PROPERTY_NOT_NULL = "NOT NULL"
 DB_COLUMN_PROPERTY_PRIMARY_KEY = "PRIMARY KEY"
+
+DB_GET_EVERYTHING = '*'
 
 
 class ServerMessageDatabase(MessageDatabase):
@@ -112,9 +114,10 @@ class ServerMessageDatabase(MessageDatabase):
         if id1 > id2:
             id1, id2 = id2, id1
         tb_name = f"{id1} {id2} {DB_SUFFIX_ENCRYPTED_KEYS}"
-        columns = (f"{DB_COLUMN_NAME_SESSION_ID} {DB_COLUMN_PROPERTY_INTEGER} {DB_COLUMN_PROPERTY_NOT_NULL}",
-                   f"{DB_COLUMN_NAME_KEY_ENC_BY_FIRST} {DB_COLUMN_PROPERTY_TEXT} {DB_COLUMN_PROPERTY_NOT_NULL}",
-                   f"{DB_COLUMN_NAME_KEY_ENC_BY_SECOND} {DB_COLUMN_PROPERTY_TEXT} {DB_COLUMN_PROPERTY_NOT_NULL}")
+        columns = (f"{DB_COLUMN_NAME_SESSION_ID} {DB_COLUMN_PROPERTY_INTEGER} {DB_COLUMN_PROPERTY_NOT_NULL} "
+                   f"{DB_COLUMN_PROPERTY_PRIMARY_KEY}",
+                   f"{DB_COLUMN_NAME_KEY_ENC_BY_FIRST} {DB_COLUMN_PROPERTY_TEXT}",
+                   f"{DB_COLUMN_NAME_KEY_ENC_BY_SECOND} {DB_COLUMN_PROPERTY_TEXT}")
         self.create_table_if_not_exist(tb_name, columns)
 
     def create_session_id_table(self):
@@ -161,26 +164,38 @@ class ServerMessageDatabase(MessageDatabase):
                       memoryview(message), memoryview(message_tag), memoryview(message_nonce))
         self.insert_into_table(tb_name, row_values)
 
-    def add_session_key(self, session_id: int, id1: int, id2: int, key_encrypted_by_first_id: bytes,
-                        key_encrypted_by_second_id: bytes):
+    def add_session_key(self, session_id: int, key_holder_id: int, second_id: int, encrypted_key: bytes) -> None:
         """
         Добавление сессионного ключа в таблицу
-        !!! id1 < id2, сперва проверяем это условие и меняем местами id и keys, потом записываем в таблицу данные
-        сначала об id1, затем id2
         :param session_id:
-        :param id1:
-        :param id2:
-        :param key_encrypted_by_first_id: симметричный сессионный ключ зашифрованный открытым ключом первого клиента
-        :param key_encrypted_by_second_id: аналогично для второго
+        :param key_holder_id: пользователь, чьим публичным ключом зашифрован данный сессионный ключ
+        :param second_id: второй пользователь
+        :param encrypted_key: симметричный сессионный ключ зашифрованный открытым ключом key_holder'a
         :return:
         """
-        if id1 > id2:
-            id1, id2 = id2, id1
-            key_encrypted_by_first_id, key_encrypted_by_second_id = \
-                key_encrypted_by_second_id, key_encrypted_by_first_id
-        tb_name = f"{id1} {id2} {DB_SUFFIX_ENCRYPTED_KEYS}"
-        row_values = (session_id, key_encrypted_by_first_id, key_encrypted_by_second_id)
-        self.insert_into_table(tb_name, row_values)
+
+        tb_name = f"{min(key_holder_id, second_id)} {max(key_holder_id, second_id)} {DB_SUFFIX_ENCRYPTED_KEYS}"
+        # Проверяем, есть ли текущая session_id в таблице (тоесть один из общающихся, уже прислал свой ключ
+        execute_str = f"SELECT {DB_GET_EVERYTHING} FROM {tb_name} WHERE {DB_COLUMN_NAME_SESSION_ID}=:session_id;"
+        self.cursor.execute(execute_str, {"session_id": session_id})
+
+        if self.cursor.fetchone():
+            # session_id уже есть в таблице
+            pass
+        else:
+            # необходимо перед добавлением ключа добавить session_id
+            execute_str = f"INSERT INTO {tb_name}({DB_COLUMN_NAME_SESSION_ID}) VALUES(:session_id);"
+            self.cursor.execute(execute_str, {"session_id": session_id})
+
+        if key_holder_id < second_id:
+            # ключ человека с меньшим id - первый в таблице
+            insert_columm = DB_COLUMN_NAME_KEY_ENC_BY_FIRST
+        else:
+            # ключ человека с большим id - второй в таблице
+            insert_columm = DB_COLUMN_NAME_KEY_ENC_BY_SECOND
+
+        execute_str = f"INSERT INTO {tb_name}({insert_columm}) VALUES(:encrypted_key)"
+        self.cursor.execute(execute_str, {"encrypted_key": encrypted_key})
 
     def get_message_history(self, id1: int, id2: int, get_secret: bool = False) -> sql.Row:
         """
@@ -195,7 +210,7 @@ class ServerMessageDatabase(MessageDatabase):
         tb_name = f"{id1} {id2}"
         if get_secret:
             tb_name += f" {DB_SUFFIX_SECRET_MESSAGES}"
-        self.cursor.execute("SELECT * FROM :tb_name;", {"tb_name": tb_name})
+        self.cursor.execute(f"SELECT {DB_GET_EVERYTHING} FROM {tb_name};")
         result = self.cursor.fetchone()
         while result:
             yield result
@@ -213,9 +228,9 @@ class ServerMessageDatabase(MessageDatabase):
             id1, id2 = id2, id1
         tb_name = f"{id1} {id2} {DB_SUFFIX_ENCRYPTED_KEYS}"
         execute_str = f"SELECT {DB_COLUMN_NAME_KEY_ENC_BY_FIRST}, {DB_COLUMN_NAME_KEY_ENC_BY_SECOND} " \
-                      f"FROM :tb_name " \
+                      f"FROM {tb_name} " \
                       f"WHERE {DB_COLUMN_NAME_SESSION_ID}=:session_id;"
-        self.cursor.execute(execute_str, {"tb_name": tb_name, "session_id": session_id})
+        self.cursor.execute(execute_str, {"session_id": session_id})
         return self.cursor.fetchone()
 
     def get_and_update_current_session_id(self, id1: int, id2: int) -> int:
@@ -252,15 +267,14 @@ class ServerUserDatabase(UserDatabase):
     def __init__(self, path: str = DB_PATH_USERS, need_server_init: bool = False):
         super().__init__(path=path)
 
+        if need_server_init:
+            self.init_server_database()
+
         # получаем максимальный номер user'a
-        self.cursor.execute("SELECT MAX(uid) "
-                            "FROM user_list;")
+        self.cursor.execute(f"SELECT MAX({DB_COLUMN_NAME_USER_ID}) FROM {DB_TABLE_NAME_USER_LIST}")
         self.max_user_id = self.cursor.fetchone()[0]
         if not self.max_user_id:  # таблица создана только что
             self.max_user_id = 0
-
-        if need_server_init:
-            self.init_server_database()
 
     def init_server_database(self) -> None:
         """
@@ -302,7 +316,7 @@ class ServerUserDatabase(UserDatabase):
         Подсчитываем сколько пользователей зарегистрировано
         :return: количество пользователей хранящихся в БД
         """
-        self.cursor.execute(f"SELECT COUNT(*) "
+        self.cursor.execute(f"SELECT COUNT({DB_GET_EVERYTHING}) "
                             f"FROM {DB_TABLE_NAME_USER_LIST};")
         result = self.cursor.fetchone()
         if not result:
@@ -391,7 +405,7 @@ class ServerUserDatabase(UserDatabase):
         :return: id пользователя или DB_USER_NOT_EXIST
         """
         self.cursor.execute(f"SELECT {DB_COLUMN_NAME_USER_ID}, {DB_COLUMN_NAME_USER_LOGIN}, "
-                            f"{DB_COLUMN_NAME_USER_PUBLIC_KEY}"
+                            f"{DB_COLUMN_NAME_USER_PUBLIC_KEY} "
                             f"FROM {DB_TABLE_NAME_USER_LIST} "
                             f"WHERE {DB_COLUMN_NAME_USER_LOGIN}=:login;",
                             {"login": memoryview(login)})
