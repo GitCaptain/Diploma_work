@@ -12,7 +12,9 @@ DB_TABLE_NAME_USER_LIST = "user_list"
 DB_TABLE_NAME_SESSION_ID = "session_id_list"
 
 DB_SUFFIX_ENCRYPTED_KEYS = "encrypted_session_keys"
-DB_SUFFIX_SECRET_MESSAGES = "secret"
+DB_SUFFIX_SECRET_MESSAGES_HISTORY = "secret_message_history"
+DB_SUFFIX_MESSAGE_HISTORY = "message_history"
+
 
 DB_COLUMN_NAME_RECEIVER_ID = "receiver_id"
 DB_COLUMN_NAME_SENDER_ID = "sender_id"
@@ -36,13 +38,11 @@ DB_COLUMN_PROPERTY_INTEGER = "INTEGER"
 DB_COLUMN_PROPERTY_NOT_NULL = "NOT NULL"
 DB_COLUMN_PROPERTY_PRIMARY_KEY = "PRIMARY KEY"
 
-DB_GET_EVERYTHING = '*'
-
 
 class ServerMessageDatabase(MessageDatabase):
     """
     Класс для работы с базой данных сообщений хранящихся на сервере,
-    таблица содержащая переписку или какие-то другие данные 2х клиентов всегда имеет имя типа "id1 id2 suffix",
+    таблица содержащая переписку или какие-то другие данные 2х клиентов всегда имеет имя типа "id1_id2_suffix",
     где id1 < id2, suffix - некоторая константа DB_SUFFIX
     """
     def __init__(self, path: str = DB_PATH_MESSAGE, need_server_init: bool = False):
@@ -70,7 +70,7 @@ class ServerMessageDatabase(MessageDatabase):
         if not table_name and (not id1 or not id2):
             raise TypeError
         if not table_name:
-            table_name = f"{min(id1, id2)} {max(id1, id2)}"
+            table_name = f"{min(id1, id2)}{DB_SEP}{max(id1, id2)}{DB_SEP}{DB_SUFFIX_MESSAGE_HISTORY}"
         columns = (f"{DB_COLUMN_NAME_SENDER_ID} {DB_COLUMN_PROPERTY_INTEGER} {DB_COLUMN_PROPERTY_NOT_NULL}",
                    f"{DB_COLUMN_NAME_RECEIVER_ID} {DB_COLUMN_PROPERTY_INTEGER} {DB_COLUMN_PROPERTY_NOT_NULL}",
                    f"{DB_COLUMN_NAME_MESSAGE} {DB_COLUMN_PROPERTY_TEXT} {DB_COLUMN_PROPERTY_NOT_NULL}")
@@ -92,7 +92,7 @@ class ServerMessageDatabase(MessageDatabase):
         if not table_name:
             if id1 > id2:
                 id1, id2 = id2, id1
-            table_name = f"{id1} {id2} {DB_SUFFIX_SECRET_MESSAGES}"
+            table_name = f"{id1}{DB_SEP}{id2}{DB_SEP}{DB_SUFFIX_SECRET_MESSAGES_HISTORY}"
 
         columns = (f"{DB_COLUMN_NAME_SESSION_ID} {DB_COLUMN_PROPERTY_INTEGER} {DB_COLUMN_PROPERTY_NOT_NULL}",
                    f"{DB_COLUMN_NAME_SENDER_ID} {DB_COLUMN_PROPERTY_INTEGER} {DB_COLUMN_PROPERTY_NOT_NULL}",
@@ -113,7 +113,7 @@ class ServerMessageDatabase(MessageDatabase):
         """
         if id1 > id2:
             id1, id2 = id2, id1
-        tb_name = f"{id1} {id2} {DB_SUFFIX_ENCRYPTED_KEYS}"
+        tb_name = f"{id1}{DB_SEP}{id2}{DB_SEP}{DB_SUFFIX_ENCRYPTED_KEYS}"
         columns = (f"{DB_COLUMN_NAME_SESSION_ID} {DB_COLUMN_PROPERTY_INTEGER} {DB_COLUMN_PROPERTY_NOT_NULL} "
                    f"{DB_COLUMN_PROPERTY_PRIMARY_KEY}",
                    f"{DB_COLUMN_NAME_KEY_ENC_BY_FIRST} {DB_COLUMN_PROPERTY_TEXT}",
@@ -139,7 +139,8 @@ class ServerMessageDatabase(MessageDatabase):
         :param message:
         :return:
         """
-        tb_name = f"{min(sender_id, receiver_id)} {max(sender_id, receiver_id)}"
+        tb_name = f"{min(sender_id, receiver_id)}{DB_SEP}{max(sender_id, receiver_id)}{DB_SEP}" \
+                  f"{DB_SUFFIX_MESSAGE_HISTORY}"
         if not self.check_if_table_exist(table_name=tb_name):
             self.create_message_table(sender_id, receiver_id)
         row_values = (sender_id, receiver_id, memoryview(message))
@@ -157,7 +158,8 @@ class ServerMessageDatabase(MessageDatabase):
         :param message_nonce:
         :return:
         """
-        tb_name = f"{min(sender_id, receiver_id)} {max(sender_id, receiver_id)} {DB_SUFFIX_SECRET_MESSAGES}"
+        tb_name = f"{min(sender_id, receiver_id)}{DB_SEP}{max(sender_id, receiver_id)}{DB_SEP}" \
+                  f"{DB_SUFFIX_SECRET_MESSAGES_HISTORY}"
         if not self.check_if_table_exist(table_name=tb_name):
             self.create_message_table(sender_id, receiver_id)
         row_values = (session_id, sender_id, receiver_id,
@@ -174,7 +176,12 @@ class ServerMessageDatabase(MessageDatabase):
         :return:
         """
 
-        tb_name = f"{min(key_holder_id, second_id)} {max(key_holder_id, second_id)} {DB_SUFFIX_ENCRYPTED_KEYS}"
+        tb_name = f"{min(key_holder_id, second_id)}{DB_SEP}{max(key_holder_id, second_id)}{DB_SEP}" \
+                  f"{DB_SUFFIX_ENCRYPTED_KEYS}"
+
+        if not self.check_if_table_exist(tb_name):
+            self.create_session_keys_table(key_holder_id, second_id)
+
         # Проверяем, есть ли текущая session_id в таблице (тоесть один из общающихся, уже прислал свой ключ
         execute_str = f"SELECT {DB_GET_EVERYTHING} FROM {tb_name} WHERE {DB_COLUMN_NAME_SESSION_ID}=:session_id;"
         self.cursor.execute(execute_str, {"session_id": session_id})
@@ -207,11 +214,16 @@ class ServerMessageDatabase(MessageDatabase):
         """
         if id1 < id2:
             id1, id2 = id2, id1
-        tb_name = f"{id1} {id2}"
+        tb_name = f"{id1}{DB_SEP}{id2}{DB_SEP}"
         if get_secret:
-            tb_name += f" {DB_SUFFIX_SECRET_MESSAGES}"
-        self.cursor.execute(f"SELECT {DB_GET_EVERYTHING} FROM {tb_name};")
-        result = self.cursor.fetchone()
+            tb_name += f"{DB_SUFFIX_SECRET_MESSAGES_HISTORY}"
+        else:
+            tb_name += f"{DB_SUFFIX_MESSAGE_HISTORY}"
+        if self.check_if_table_exist(tb_name):
+            self.cursor.execute(f"SELECT {DB_GET_EVERYTHING} FROM {tb_name};")
+            result = self.cursor.fetchone()
+        else:
+            result = None
         while result:
             yield result
             result = self.cursor.fetchone()
@@ -226,7 +238,9 @@ class ServerMessageDatabase(MessageDatabase):
         """
         if id1 > id2:
             id1, id2 = id2, id1
-        tb_name = f"{id1} {id2} {DB_SUFFIX_ENCRYPTED_KEYS}"
+        tb_name = f"{id1}{DB_SEP}{id2}{DB_SEP}{DB_SUFFIX_ENCRYPTED_KEYS}"
+        if not self.check_if_table_exist(tb_name):
+            return None
         execute_str = f"SELECT {DB_COLUMN_NAME_KEY_ENC_BY_FIRST}, {DB_COLUMN_NAME_KEY_ENC_BY_SECOND} " \
                       f"FROM {tb_name} " \
                       f"WHERE {DB_COLUMN_NAME_SESSION_ID}=:session_id;"
@@ -248,9 +262,11 @@ class ServerMessageDatabase(MessageDatabase):
                       f"FROM {DB_TABLE_NAME_SESSION_ID} " \
                       f"WHERE {DB_COLUMN_NAME_FIRST_CLIENT}=:id1 and {DB_COLUMN_NAME_SECOND_CLIENT}=:id2;"
         self.cursor.execute(execute_str, {"id1": id1, "id2": id2})
-        current_session_id = self.cursor.fetchone()[0]
+        current_session_id = self.cursor.fetchone()
         if not current_session_id:
             current_session_id = 1
+        else:
+            current_session_id = current_session_id[DB_COLUMN_NAME_SESSION_ID]
         new_session_id = current_session_id + 1
         execute_str = f"UPDATE {DB_TABLE_NAME_SESSION_ID} " \
                       f"SET {DB_COLUMN_NAME_SESSION_ID}=:new_session_id " \

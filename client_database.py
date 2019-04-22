@@ -9,7 +9,8 @@ DB_PATH_MESSAGE = DB_FOLDER + os.sep + DB_NAME_MESSAGE
 
 DB_TABLE_NAME_FRIEND_LIST = "friend_list"
 
-DB_SUFFIX_SECRET_MESSAGES = "secret"
+DB_SUFFIX_SECRET_MESSAGES_HISTORY = "secret_message_history"
+DB_SUFFIX_MESSAGE_HISTORY = "message_history"
 
 DB_COLUMN_NAME_MESSAGE_RECEIVED = "message_received"  # Это сообщение я получил, а не отправил
 DB_COLUMN_NAME_MESSAGE = "message"
@@ -21,8 +22,6 @@ DB_COLUMN_PROPERTY_TEXT = "TEXT"
 DB_COLUMN_PROPERTY_INTEGER = "INTEGER"
 DB_COLUMN_PROPERTY_NOT_NULL = "NOT NULL"
 DB_COLUMN_PROPERTY_PRIMARY_KEY = "PRIMARY KEY"
-
-DB_GET_EVERYTHING = '*'
 
 
 class ClientMessageDatabase(MessageDatabase):
@@ -45,9 +44,11 @@ class ClientMessageDatabase(MessageDatabase):
         if not table_name and not friend_id:
             raise TypeError
         if not table_name:
-            tb_name = f"{friend_id}"
+            tb_name = f"{friend_id}{DB_SEP}"
             if secret_messages:
-                tb_name += f" {DB_SUFFIX_SECRET_MESSAGES}"
+                tb_name += f"{DB_SUFFIX_SECRET_MESSAGES_HISTORY}"
+            else:
+                tb_name += f"{DB_SUFFIX_MESSAGE_HISTORY}"
         columns = (f"{DB_COLUMN_NAME_MESSAGE_RECEIVED} {DB_COLUMN_PROPERTY_INTEGER} {DB_COLUMN_PROPERTY_NOT_NULL}",
                    f"{DB_COLUMN_NAME_MESSAGE} {DB_COLUMN_PROPERTY_TEXT} {DB_COLUMN_PROPERTY_NOT_NULL}")
         self.create_table_if_not_exist(tb_name, columns)
@@ -61,9 +62,11 @@ class ClientMessageDatabase(MessageDatabase):
         :param message:
         :return:
         """
-        tb_name = f"{friend_id}"
+        tb_name = f"{friend_id}{DB_SEP}"
         if message_secret:
-            tb_name += f" {DB_SUFFIX_SECRET_MESSAGES}"
+            tb_name += f"{DB_SUFFIX_SECRET_MESSAGES_HISTORY}"
+        else:
+            tb_name += f"{DB_SUFFIX_MESSAGE_HISTORY}"
         if not self.check_if_table_exist(table_name=tb_name):
             self.create_message_table(table_name=tb_name)
         row_values = (message_received, message)
@@ -76,11 +79,17 @@ class ClientMessageDatabase(MessageDatabase):
         :param get_secret: True - переписка из шифорванных сообщений, False - нет
         :return:
         """
-        tb_name = f"{friend_id}"
+        tb_name = f"{friend_id}{DB_SEP}"
         if get_secret:
-            tb_name += f" {DB_SUFFIX_SECRET_MESSAGES}"
-        self.cursor.execute(f"SELECT {DB_GET_EVERYTHING} FROM {tb_name};")
-        result = self.cursor.fetchone()
+            tb_name += f"{DB_SUFFIX_SECRET_MESSAGES_HISTORY}"
+        else:
+            tb_name += f"{DB_SUFFIX_MESSAGE_HISTORY}"
+
+        if self.check_if_table_exist(tb_name):
+            self.cursor.execute(f"SELECT {DB_GET_EVERYTHING} FROM {tb_name};")
+            result = self.cursor.fetchone()
+        else:
+            result = None
         while result:
             yield result
             result = self.cursor.fetchone()

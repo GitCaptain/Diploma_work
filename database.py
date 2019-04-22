@@ -1,6 +1,9 @@
 import sqlite3 as sql
 import os
 
+DB_SEP = '_'
+DB_GET_EVERYTHING = '*'
+
 
 class Database:
     """
@@ -47,7 +50,7 @@ class Database:
         str_to_execute = f"CREATE TABLE {table_name}(" \
                          f"{self.get_table_params_string_from_args(ordered_columns_info)}" \
                          f");"
-        self.cursor.execute(str_to_execute, {"table_name": table_name})
+        self.cursor.execute(str_to_execute)
 
     def create_table_if_not_exist(self, table_name, ordered_columns_info: 'tuple(str)') -> None:
         """

@@ -1,6 +1,5 @@
 from common_functions_and_data_structures import *
 from server_database import *
-from Crypto.Cipher import AES
 from Crypto.Random import get_random_bytes
 import threading  # заменить на настоящуюю многопоточность
 import traceback
@@ -34,7 +33,13 @@ class Server:
 
     def process_command(self, user: User, message: Message) -> bool:  # разнести все по функциям
         # message.message = 'command_type ...'
-        data = message.message.split()
+        # разделять нужно именно по пробелу, чтоб не убирать \n (если их убрать, то например полученный
+        # открытый улюч пользователя неудастся восстановить)
+        if message.message_type == BYTES_COMMAND:
+            sep = b' '
+        else:
+            sep = ' '
+        data = message.message.split(sep)
         command = int(data[0])
         if not self.thread_locals.user_authenticated and command != LOG_IN and command != REGISTER_USER:
             message = Message(message_type=COMMAND, sender_id=self.id, receiver_id=ID_ERROR,
@@ -97,6 +102,11 @@ class Server:
             peer_id = int(data[1])
             encrypted_key = data[2]
             session_id = self.thread_locals.messages_database.get_and_update_current_session_id(user.id, peer_id)
+            if peer_id not in self.authenticated_users:
+                message = Message(message_type=COMMAND, receiver_id=user.id, sender_id=SERVER_ID)
+                message.message = f"{USER_OFFLINE} {peer_id}"
+                send_message_to_client(user, message, user.symmetric_key)
+                return False
             receiver = self.authenticated_users[peer_id]
             # сначала отсылаем второму пользователю зашифрованный ключ
             message = Message(message_type=BYTES_COMMAND, receiver_id=receiver.id, sender_id=SERVER_ID)
@@ -109,6 +119,7 @@ class Server:
             message = Message(message_type=COMMAND, receiver_id=receiver.id, sender_id=SERVER_ID,
                               message=f"{GET_SESSION_KEY} {session_id} {user.id}")
             send_message_to_client(receiver, message, user.symmetric_key)
+            return True
         elif command == SESSION_ENCRYPTED_KEY:
             # data = [.., b'session_id', b'friend_id', b'encrypted_key']
             session_id = int(data[1])
@@ -191,21 +202,18 @@ class Server:
                               + db_mes[DB_COLUMN_NAME_MESSAGE_NONCE]
             send_message_to_client(user, message, user.symmetric_key)
 
-    def client_registration(self, user: User, login: bytes, password: bytes, public_key: bytes) -> bool:
+    def client_registration(self, user: User, login: bytes, password: bytes, public_key: list) -> bool:
         """
         Регистрируем нового пользователя
         :param user:
         :param login:
         :param password:
-        :param public_key:
+        :param public_key: открытый ключ, возможно распавшийся на несколько частей
         :return: True, если регистрация прошла успешно, т.е. логин не был занят и ничего другого плохого не случилось,
                  иначе False
         """
 
-        # Могло (а может и нет, но на всякий случай предусмотрим это) оказаться, что в public_key клиентa
-        # оказался один или несколько пробелов, тогда во время data.split() public_key клиента распался
-        #  на несколько частей, которые необходимо склеить, вставив между ними пробел
-        public_key = b' '.join(public_key)
+        public_key = get_public_key_from_parts(public_key)
 
         saltl = get_random_bytes(8)
         saltr = get_random_bytes(8)
@@ -263,8 +271,18 @@ class Server:
         :param message:
         :return:
         """
+        if not message.secret:
+            # сообщение не зашифровано, но подписано ключом, который знает отправитель и сервер,
+            # нужно проверить подлинность этого сообщения ключом сервера и отправителя и, если оно не повреждено,
+            # переподписать ключом известным серверу и получателю, иначе прекратить обработку сообщения
+            sid = message.sender_id
+            message.message = get_decrypted_message(message.message, self.authenticated_users[sid].symmetric_key,
+                                                    message.tag, message.nonce)
+            if message.message == BROKEN_MESSAGE:
+                return
         if message.receiver_id in self.authenticated_users:
             receiver = self.authenticated_users[message.receiver_id]
+            message.message, message.tag, message.nonce = get_encrypted_message(message.message, receiver.symmetric_key)
             send_message_to_client(receiver, message, receiver.symmetric_key)
         if self.thread_locals.users_database.check_if_user_exist(user_id=message.receiver_id):
             if message.secret:

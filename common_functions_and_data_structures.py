@@ -76,7 +76,8 @@ def get_encrypted_message(message: bytes, key: bytes, need_encrypt: bool = False
     return ciphertext, tag, nonce
 
 
-def get_decrypted_message(message: bytes, key: bytes, tag: bytes, nonce: bytes, need_decrypt: bool = False) -> bytes:
+def get_decrypted_message(message: bytes, key: bytes, tag: bytes, nonce: bytes, need_decrypt: bool = False) -> \
+        bytes or int:
     """
     Проверяет подпись и при необходимости расшифровывает сообщение
     :param message:
@@ -84,7 +85,7 @@ def get_decrypted_message(message: bytes, key: bytes, tag: bytes, nonce: bytes, 
     :param tag:
     :param nonce:
     :param need_decrypt: Нужно ли расшифровывать сообщение
-    :return: Расшифрованное (проверенное) сообщение, или сообщение об ошибке
+    :return: Расшифрованное (проверенное) сообщение, если оно не повреждено, иначе константу MESSAGE_ERROR
     """
     try:
         if need_decrypt:
@@ -95,7 +96,7 @@ def get_decrypted_message(message: bytes, key: bytes, tag: bytes, nonce: bytes, 
             mac.update(message)
             mac.verify(tag)
     except ValueError:  # Сообщение повреждено при передаче
-        return b'Message corrupted during transmission'
+        return MESSAGE_ERROR
     return message
 
 
@@ -245,6 +246,17 @@ def get_text_from_bytes_data(data: bytes) -> str:
     :return:
     """
     return data.decode(ENCODING)
+
+
+def get_public_key_from_parts(public_key_parts: list) -> bytes:
+    """
+    Могло (а может и нет, но на всякий случай предусмотрим это) оказаться, что в public_key клиентa
+    оказался один или несколько пробелов, тогда во время data.split() public_key клиента распался
+    на несколько частей, которые необходимо склеить, вставив между ними пробел
+    :param public_key_parts: части на которые распался public_key
+    :return: собранный public_key
+    """
+    return b' '.join(public_key_parts)
 
 
 if __name__ == '__main__':
