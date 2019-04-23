@@ -56,7 +56,7 @@ class Database:
         """
         То же, что и create_table, но только проверяет, что создаваемая таблица еще не существует в БД
         :param table_name:
-        :param ordered_columns_info: смотри create_table
+        :param ordered_columns_info: Упорядоченные названия полей и их свойства
         :return:
         """
         str_to_execute = f"CREATE TABLE IF NOT EXISTS {table_name}(" \
@@ -96,6 +96,7 @@ class Database:
                             "VALUES (:data);",
                             {"data": data2})
         self.database_connection.commit()
+
         self.cursor.execute("SELECT * FROM test1")
         return self.cursor.fetchall()
 

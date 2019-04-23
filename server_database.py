@@ -11,9 +11,9 @@ DB_PATH_MESSAGE = DB_FOLDER + os.sep + DB_NAME_MESSAGE
 DB_TABLE_NAME_USER_LIST = "user_list"
 DB_TABLE_NAME_SESSION_ID = "session_id_list"
 
-DB_SUFFIX_ENCRYPTED_KEYS = "encrypted_session_keys"
-DB_SUFFIX_SECRET_MESSAGES_HISTORY = "secret_message_history"
-DB_SUFFIX_MESSAGE_HISTORY = "message_history"
+DB_PREFIX_ENCRYPTED_KEYS = "encrypted_session_keys"
+DB_PREFIX_SECRET_MESSAGES_HISTORY = "secret_message_history"
+DB_PREFIX_MESSAGE_HISTORY = "message_history"
 
 
 DB_COLUMN_NAME_RECEIVER_ID = "receiver_id"
@@ -42,8 +42,8 @@ DB_COLUMN_PROPERTY_PRIMARY_KEY = "PRIMARY KEY"
 class ServerMessageDatabase(MessageDatabase):
     """
     Класс для работы с базой данных сообщений хранящихся на сервере,
-    таблица содержащая переписку или какие-то другие данные 2х клиентов всегда имеет имя типа "id1_id2_suffix",
-    где id1 < id2, suffix - некоторая константа DB_SUFFIX
+    таблица содержащая переписку или какие-то другие данные 2х клиентов всегда имеет имя типа "prefix_id1_id2",
+    где id1 < id2, suffix - некоторая константа DB_PREFIX
     """
     def __init__(self, path: str = DB_PATH_MESSAGE, need_server_init: bool = False):
         super().__init__(path=path)
@@ -70,7 +70,7 @@ class ServerMessageDatabase(MessageDatabase):
         if not table_name and (not id1 or not id2):
             raise TypeError
         if not table_name:
-            table_name = f"{min(id1, id2)}{DB_SEP}{max(id1, id2)}{DB_SEP}{DB_SUFFIX_MESSAGE_HISTORY}"
+            table_name = f"{DB_PREFIX_MESSAGE_HISTORY}{DB_SEP}{min(id1, id2)}{DB_SEP}{max(id1, id2)}"
         columns = (f"{DB_COLUMN_NAME_SENDER_ID} {DB_COLUMN_PROPERTY_INTEGER} {DB_COLUMN_PROPERTY_NOT_NULL}",
                    f"{DB_COLUMN_NAME_RECEIVER_ID} {DB_COLUMN_PROPERTY_INTEGER} {DB_COLUMN_PROPERTY_NOT_NULL}",
                    f"{DB_COLUMN_NAME_MESSAGE} {DB_COLUMN_PROPERTY_TEXT} {DB_COLUMN_PROPERTY_NOT_NULL}")
@@ -92,7 +92,7 @@ class ServerMessageDatabase(MessageDatabase):
         if not table_name:
             if id1 > id2:
                 id1, id2 = id2, id1
-            table_name = f"{id1}{DB_SEP}{id2}{DB_SEP}{DB_SUFFIX_SECRET_MESSAGES_HISTORY}"
+            table_name = f"{DB_PREFIX_SECRET_MESSAGES_HISTORY}{DB_SEP}{id1}{DB_SEP}{id2}"
 
         columns = (f"{DB_COLUMN_NAME_SESSION_ID} {DB_COLUMN_PROPERTY_INTEGER} {DB_COLUMN_PROPERTY_NOT_NULL}",
                    f"{DB_COLUMN_NAME_SENDER_ID} {DB_COLUMN_PROPERTY_INTEGER} {DB_COLUMN_PROPERTY_NOT_NULL}",
@@ -113,7 +113,7 @@ class ServerMessageDatabase(MessageDatabase):
         """
         if id1 > id2:
             id1, id2 = id2, id1
-        tb_name = f"{id1}{DB_SEP}{id2}{DB_SEP}{DB_SUFFIX_ENCRYPTED_KEYS}"
+        tb_name = f"{DB_PREFIX_ENCRYPTED_KEYS}{DB_SEP}{id1}{DB_SEP}{id2}"
         columns = (f"{DB_COLUMN_NAME_SESSION_ID} {DB_COLUMN_PROPERTY_INTEGER} {DB_COLUMN_PROPERTY_NOT_NULL} "
                    f"{DB_COLUMN_PROPERTY_PRIMARY_KEY}",
                    f"{DB_COLUMN_NAME_KEY_ENC_BY_FIRST} {DB_COLUMN_PROPERTY_TEXT}",
@@ -139,10 +139,10 @@ class ServerMessageDatabase(MessageDatabase):
         :param message:
         :return:
         """
-        tb_name = f"{min(sender_id, receiver_id)}{DB_SEP}{max(sender_id, receiver_id)}{DB_SEP}" \
-                  f"{DB_SUFFIX_MESSAGE_HISTORY}"
+        tb_name = f"{DB_PREFIX_MESSAGE_HISTORY}{DB_SEP}{min(sender_id, receiver_id)}{DB_SEP}" \
+                  f"{max(sender_id, receiver_id)}"
         if not self.check_if_table_exist(table_name=tb_name):
-            self.create_message_table(sender_id, receiver_id)
+            self.create_message_table(table_name=tb_name)
         row_values = (sender_id, receiver_id, memoryview(message))
         self.insert_into_table(tb_name, row_values)
 
@@ -158,10 +158,10 @@ class ServerMessageDatabase(MessageDatabase):
         :param message_nonce:
         :return:
         """
-        tb_name = f"{min(sender_id, receiver_id)}{DB_SEP}{max(sender_id, receiver_id)}{DB_SEP}" \
-                  f"{DB_SUFFIX_SECRET_MESSAGES_HISTORY}"
+        tb_name = f"{DB_PREFIX_SECRET_MESSAGES_HISTORY}{DB_SEP}{min(sender_id, receiver_id)}{DB_SEP}" \
+                  f"{max(sender_id, receiver_id)}"
         if not self.check_if_table_exist(table_name=tb_name):
-            self.create_message_table(sender_id, receiver_id)
+            self.create_secret_message_table(table_name=tb_name)
         row_values = (session_id, sender_id, receiver_id,
                       memoryview(message), memoryview(message_tag), memoryview(message_nonce))
         self.insert_into_table(tb_name, row_values)
@@ -176,8 +176,8 @@ class ServerMessageDatabase(MessageDatabase):
         :return:
         """
 
-        tb_name = f"{min(key_holder_id, second_id)}{DB_SEP}{max(key_holder_id, second_id)}{DB_SEP}" \
-                  f"{DB_SUFFIX_ENCRYPTED_KEYS}"
+        tb_name = f"{DB_PREFIX_ENCRYPTED_KEYS}{DB_SEP}{min(key_holder_id, second_id)}{DB_SEP}" \
+                  f"{max(key_holder_id, second_id)}"
 
         if not self.check_if_table_exist(tb_name):
             self.create_session_keys_table(key_holder_id, second_id)
@@ -214,11 +214,12 @@ class ServerMessageDatabase(MessageDatabase):
         """
         if id1 < id2:
             id1, id2 = id2, id1
-        tb_name = f"{id1}{DB_SEP}{id2}{DB_SEP}"
         if get_secret:
-            tb_name += f"{DB_SUFFIX_SECRET_MESSAGES_HISTORY}"
+            tb_name = f"{DB_PREFIX_SECRET_MESSAGES_HISTORY}{DB_SEP}"
         else:
-            tb_name += f"{DB_SUFFIX_MESSAGE_HISTORY}"
+            tb_name = f"{DB_PREFIX_MESSAGE_HISTORY}{DB_SEP}"
+        tb_name += f"{id1}{DB_SEP}{id2}"
+
         if self.check_if_table_exist(tb_name):
             self.cursor.execute(f"SELECT {DB_GET_EVERYTHING} FROM {tb_name};")
             result = self.cursor.fetchone()
@@ -238,7 +239,7 @@ class ServerMessageDatabase(MessageDatabase):
         """
         if id1 > id2:
             id1, id2 = id2, id1
-        tb_name = f"{id1}{DB_SEP}{id2}{DB_SEP}{DB_SUFFIX_ENCRYPTED_KEYS}"
+        tb_name = f"{DB_PREFIX_ENCRYPTED_KEYS}{DB_SEP}{id1}{DB_SEP}{id2}"
         if not self.check_if_table_exist(tb_name):
             return None
         execute_str = f"SELECT {DB_COLUMN_NAME_KEY_ENC_BY_FIRST}, {DB_COLUMN_NAME_KEY_ENC_BY_SECOND} " \
@@ -285,12 +286,6 @@ class ServerUserDatabase(UserDatabase):
 
         if need_server_init:
             self.init_server_database()
-
-        # получаем максимальный номер user'a
-        self.cursor.execute(f"SELECT MAX({DB_COLUMN_NAME_USER_ID}) FROM {DB_TABLE_NAME_USER_LIST}")
-        self.max_user_id = self.cursor.fetchone()[0]
-        if not self.max_user_id:  # таблица создана только что
-            self.max_user_id = 0
 
     def init_server_database(self) -> None:
         """
@@ -356,12 +351,20 @@ class ServerUserDatabase(UserDatabase):
 
         if self.check_if_user_exist(login=login):  # пользователь уже существует
             return DB_USER_ALREADY_EXIST
-        self.max_user_id += 1
         tb_name = DB_TABLE_NAME_USER_LIST
-        row_values = (self.max_user_id, memoryview(login), memoryview(hashed_password), memoryview(saltl),
+
+        # получаем максимальный номер user'a
+        self.cursor.execute(f"SELECT MAX({DB_COLUMN_NAME_USER_ID}) FROM {DB_TABLE_NAME_USER_LIST}")
+        user_id = self.cursor.fetchone()[0]
+        if not user_id:  # таблица создана только что
+            user_id = 0
+
+        user_id += 1
+
+        row_values = (user_id, memoryview(login), memoryview(hashed_password), memoryview(saltl),
                       memoryview(saltr), memoryview(public_key))
         self.insert_into_table(tb_name, row_values)
-        return self.max_user_id
+        return user_id
 
     def delete_user(self, user_id: int) -> None:
         """

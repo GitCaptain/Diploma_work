@@ -21,10 +21,10 @@ class Message:
     """
     Структура содержащая данные о сообщении
     """
-    def __init__(self, message_type: int, receiver_id: int, sender_id: int, length: int = 0, message: (bytes, str) = "",
+    def __init__(self, type: int, receiver_id: int, sender_id: int, length: int = 0, message: (bytes, str) = "",
                  secret: bool = False, message_tag: bytes = b'', message_nonce: bytes = b'',
                  secret_session_id: int = 0):
-        self.message_type = message_type
+        self.type = type
         self.receiver_id = receiver_id
         self.length = length
         self.message = message
@@ -38,7 +38,7 @@ class Message:
         return bool(self.message)
 
 
-BROKEN_MESSAGE = Message(message_type=MESSAGE_ERROR, sender_id=ID_ERROR, receiver_id=ID_ERROR)
+BROKEN_MESSAGE = Message(type=MESSAGE_ERROR, sender_id=ID_ERROR, receiver_id=ID_ERROR)
 
 
 def get_hash(string: bytes, saltl: bytes = b'', saltr: bytes = b'', hash_func=SHA256) -> bytes:
@@ -149,7 +149,7 @@ def get_message_from_client(user: User, server: bool = False) -> Message:
     tag = recv_message(tag_length)
     nonce = recv_message(nonce_length)
 
-    message = Message(message_type=message_type,
+    message = Message(type=message_type,
                       receiver_id=receiver_id,
                       sender_id=sender_id,
                       length=message_length,
@@ -178,7 +178,7 @@ def get_prepared_message(message: Message, symmetric_key: bytes) -> (bytes, byte
     message.message, tag, nonce = get_encrypted_message(message.message, symmetric_key, need_encrypt=message.secret)
 
     message.length = len(message.message)
-    message_data_str = f"{message.message_type} " \
+    message_data_str = f"{message.type} " \
                        f"{message.length} " \
                        f"{message.receiver_id} " \
                        f"{message.sender_id} " \
@@ -260,7 +260,7 @@ def get_public_key_from_parts(public_key_parts: list) -> bytes:
 
 
 if __name__ == '__main__':
-    d, _ = get_prepared_message(Message(message="123", message_type="test" * 20))
+    d, _ = get_prepared_message(Message(message="123", type="test" * 20))
     print(*map(len, d))
     print(d)
 
