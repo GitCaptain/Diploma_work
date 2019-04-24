@@ -85,10 +85,11 @@ class Server:
             command_to_peer = P2P_CONNECTION_DATA
             if command_type == P2P_ADDRESS:
                 user_private_address = data[3], int(data[4])
-                message.message = "{} {} {} {} {} {} {}".format(command_to_peer, command_type, user.id,
-                                                                *user.public_address, *user_private_address)
+                message.message = f"{command_to_peer} {command_type} {user.id} " \
+                                  f"{user_public_address[0]} {user_public_address[1]} " \
+                                  f"{user_private_address[0]} {user_private_address[1]}"
             elif command_type == P2P_CONNECTION_TYPE:
-                message.message = "{} {} {} {}".format(command_to_peer, command_type, user.id, data[3])
+                message.message = f"{command_to_peer} {command_type} {user.id} {data[3]}"
             send_message_to_client(second_peer, message, user.symmetric_key)
         elif command == GET_MESSAGES:
             # data = [.., 'users_friend_id']
@@ -98,34 +99,38 @@ class Server:
             send_message_to_client(user, Message(type=COMMAND, sender_id=self.id, receiver_id=user.id,
                                                  message=str(ALL_MESSAGES_SENDED)), user.symmetric_key)
         elif command == SYMMETRIC_KEY_EXCHANGE:
-            # data = [..., b'peer_id', b'symmetric_key']
+            # data = [..., b'peer_id', b'user_beg', b'user_end', b'peer_beg', b'peer_end',
+            # b'user_encrypted_key', b'friend_encrypted_key']
             peer_id = int(data[1])
-            encrypted_key = data[2]
+
+            # возможно, что при разбиении по пробелу, ключи также распались на части (тоесть содержали пробел) тогда
+            # перед тем как работать с ними дальше их нужно собрать из этих частей, разделителем между ключами служит
+            # b'split'. user_beg, user_end - количество пробелов в начале и конце ключа пользователя, peer_beg peer_end
+            # - аналогично, для его друга
+            split = data.index(b'split')
+            user_beg, user_end = int(data[2]), int(data[3])
+            peer_beg, peer_end = int(data[4]), int(data[5])
+
+            def get_key(beg, parts, end):
+                return (b' ' * beg) + get_key_from_parts(parts) + (b' ' * end)
+
+            user_encrypted_key = get_key(user_beg, data[6:split], user_end)
+            peer_encrypted_key = get_key(peer_beg, data[split+1:], peer_end)
+
             session_id = self.thread_locals.messages_database.get_and_update_current_session_id(user.id, peer_id)
-            if peer_id not in self.authenticated_users:
-                message = Message(type=COMMAND, receiver_id=user.id, sender_id=SERVER_ID)
-                message.message = f"{USER_OFFLINE} {peer_id}"
-                send_message_to_client(user, message, user.symmetric_key)
-                return False
-            receiver = self.authenticated_users[peer_id]
-            # сначала отсылаем второму пользователю зашифрованный ключ
-            message = Message(type=BYTES_COMMAND, receiver_id=receiver.id, sender_id=SERVER_ID)
-            message.message = get_bytes_string(f"{SYMMETRIC_KEY} {user.id} ") + encrypted_key
-            send_message_to_client(receiver, message, user.symmetric_key)
-            # затем отсылаем обоим пользователям session_id, чтоб получить их заишфрованные ключи
-            message = Message(type=COMMAND, receiver_id=user.id, sender_id=SERVER_ID,
-                              message=f"{GET_SESSION_KEY} {session_id} {receiver.id}")
-            send_message_to_client(user, message, user.symmetric_key)
-            message = Message(type=COMMAND, receiver_id=receiver.id, sender_id=SERVER_ID,
-                              message=f"{GET_SESSION_KEY} {session_id} {user.id}")
-            send_message_to_client(receiver, message, user.symmetric_key)
+            # Добавляем пару сессионных ключей в БД
+            self.thread_locals.messages_database.add_session_key_pair(session_id, user.id, peer_id,
+                                                                      user_encrypted_key, peer_encrypted_key)
+
+            # если клиент в сети, то он сразу получает свой ключ
+            if peer_id in self.authenticated_users:
+                receiver = self.authenticated_users[peer_id]
+                message = Message(type=BYTES_COMMAND, receiver_id=receiver.id, sender_id=SERVER_ID)
+                message.message = get_bytes_string(f"{SYMMETRIC_KEY} {user.id} ") + peer_encrypted_key
+                send_message_to_client(receiver, message, user.symmetric_key)
+
             return True
-        elif command == SESSION_ENCRYPTED_KEY:
-            # data = [.., b'session_id', b'friend_id', b'encrypted_key']
-            session_id = int(data[1])
-            friend_id = int(data[2])
-            encrypted_key = data[3]
-            self.thread_locals.messages_database.add_session_key(session_id, user.id, friend_id, encrypted_key)
+
         else:
             pass
 
@@ -213,7 +218,7 @@ class Server:
                  иначе False
         """
 
-        public_key = get_public_key_from_parts(public_key)
+        public_key = get_key_from_parts(public_key)
 
         saltl = get_random_bytes(8)
         saltr = get_random_bytes(8)

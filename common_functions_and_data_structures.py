@@ -248,7 +248,7 @@ def get_text_from_bytes_data(data: bytes) -> str:
     return data.decode(ENCODING)
 
 
-def get_public_key_from_parts(public_key_parts: list) -> bytes:
+def get_key_from_parts(public_key_parts: list) -> bytes:
     """
     Могло (а может и нет, но на всякий случай предусмотрим это) оказаться, что в public_key клиентa
     оказался один или несколько пробелов, тогда во время data.split() public_key клиента распался

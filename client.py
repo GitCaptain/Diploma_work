@@ -302,13 +302,10 @@ class Client:
 
         if secret:
             if receiver_id not in self.friendly_users:
-                print("Для начала секретного чата необходимо добавить пользователя в друзья")
-                return
+                self.friendly_users[receiver_id] = Friend(client_id=receiver_id)
             receiver = self.friendly_users[receiver_id]
-            self.create_secret_chat(receiver.id)
-            # ждем пока установится сессионный ключ, чтоб можно было отправить сообщение - говно, переделать!!!
-            while not receiver.symmetric_key:
-                pass
+            if not receiver.symmetric_key:
+                self.symmetric_key_exchange_with_friend(receiver.id)
             key = receiver.symmetric_key
         else:
             key = self.server.symmetric_key
@@ -429,16 +426,6 @@ class Client:
 
         self.connector.new_connection_task(user_id, initiator=creator)
 
-    def create_secret_chat(self, friend_id: int) -> None:
-        """
-        Запускаем процедуру обмена ключами с friend_id, и ждем ее завершения
-        :param friend_id:
-        :return:
-        """
-        if self.friendly_users[friend_id].symmetric_key:
-            return
-        self.symmetric_key_exchange_with_friend(friend_id)
-
     def symmetric_key_exchange_with_friend(self, friend_id: int) -> None:
         """
         Создаем ключ, для секретноей переписки с другом (без разницы P2P или через сервер), шифруем его открыты ключом
@@ -448,10 +435,30 @@ class Client:
         """
         key = get_random_bytes(SYMMETRIC_KEY_LEN_IN_BYTES)
         self.friendly_users[friend_id].symmetric_key = key
-        key = RSA_encrypt(self.friendly_users[friend_id].public_key, key)
-        # secret = False, т.к. симметричный ключ уже зашифрован публичным ключом друга, и дополнительная защита не нужна
+
+        def count_spaces(key):
+            beg, end = 0, 0
+            while key[beg] == b' ':
+                beg += 1
+            while friend_encrypted_key[-1 - end] == b' ':
+                end+= 1
+            return beg, end
+
+        friend_encrypted_key = RSA_encrypt(self.friendly_users[friend_id].public_key, key)
+        frnd_beg, frnd_end = count_spaces(friend_encrypted_key)
+
+        self_encrypted_key = RSA_encrypt(self.public_key, key)
+        self_beg, self_end = count_spaces(self_encrypted_key)
+
+        print(f"send self: {len(self_encrypted_key)}, friend: {len(friend_encrypted_key)}")
+        # secret = False, т.к. симметричный ключ уже зашифрован публичным ключом, и дополнительная защита не нужна
+        # b' split ' нужен, т.к. в ключе могут быть символы b' ' и при разделении по пробелам на сервере, он распадется
+        # на части, по этому слову сервер будет знать, где заканчивается один ключ и начинается другой, также
+        # нужно передать количество пробелов в начале и конце каждого ключа, т.к. эти пробелы по другому не восстановить
         message = Message(type=BYTES_COMMAND, secret=False, sender_id=self.id, receiver_id=SERVER_ID,
-                          message=get_bytes_string(f"{SYMMETRIC_KEY_EXCHANGE} {friend_id} ") + key)
+                          message=get_bytes_string(f"{SYMMETRIC_KEY_EXCHANGE} {friend_id} "
+                                                   f"{self_beg} {self_end} {frnd_beg} {frnd_end} ")
+                                  + self_encrypted_key + b' split ' + friend_encrypted_key)
         send_message_to_client(self.server, message, self.server.symmetric_key)
 
 
@@ -517,7 +524,7 @@ class ReceivedMessageManager:
             # data = [.., b'uid', b'login', b'public_key']
             uid = int(data[1])
             login = get_text_from_bytes_data(data[2])
-            public_key = get_public_key_from_parts(data[3:])
+            public_key = get_key_from_parts(data[3:])
             self.client.thread_locals.users_database.add_friend(uid, login, public_key)
             public_key = RSA.import_key(public_key)
             friend = Friend(client_id=uid, login=login, public_key=public_key)
@@ -557,24 +564,12 @@ class ReceivedMessageManager:
         elif command == SYMMETRIC_KEY:
             # data = [.., b'friend_id', b'key']
             friend_id = int(data[1])
+            encrypted_key = data[2]
+            if friend_id not in self.client.friendly_users:
+                self.client.friendly_users[friend_id] = Friend(client_id=friend_id)
             friend = self.client.friendly_users[friend_id]
-            if not friend.symmetric_key:
-                encrypted_key = data[2]
-                friend.symmetric_key = RSA_decrypt(self.client.private_key, encrypted_key)
-        elif command == GET_SESSION_KEY:
-            # data = [.., 'session_id', 'friend_id']
-            session_id = data[1]
-            friend_id = int(data[2])
-            self.client.friendly_users[friend_id].secret_session_id = session_id
-            friend = self.client.friendly_users[friend_id]
-            while not friend.symmetric_key:
-                # Ждем доставки и расшифровки сессионного ключа
-                pass
-            session_key = RSA_encrypt(friend.public_key, friend.symmetric_key)
-            message = Message(type=BYTES_COMMAND, receiver_id=SERVER_ID, sender_id=self.client.id,
-                              message=get_bytes_string(f"{SESSION_ENCRYPTED_KEY} {session_id} {friend_id} ")
-                                      + session_key)
-            send_message_to_client(self.client.server, message, self.client.server.symmetric_key)
+            print(f"recv {len(encrypted_key)}")
+            friend.symmetric_key = RSA_decrypt(self.client.private_key, encrypted_key)
         else:
             pass
 
@@ -632,11 +627,8 @@ class ReceivedMessageManager:
         """
         self.session_keys.clear()
 
-
+"""
 class KeyExchanger:
-    """
-    Класс, для обмена секретными ключами
-    """
 
     def __init__(self, client: Client):
         self.client = client
@@ -662,6 +654,8 @@ class KeyExchanger:
 
     def run_task(self):
 
+        # в дальнейшем этот шаг будет не обязательным,
+        # так как любое взаимодействие будет производиться только с друзьями
         if self.friend_id not in self.client.friendly_users:
             self.client.add_friend(friend_id=self.friend_id)
 
@@ -674,6 +668,7 @@ class KeyExchanger:
     def stop_task(self, friend_id: int):
         if self.friend_id == friend_id:
             self.task_in_process = False
+"""
 
 
 class Peer2PeerConnector:

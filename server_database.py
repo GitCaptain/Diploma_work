@@ -126,9 +126,9 @@ class ServerMessageDatabase(MessageDatabase):
         :return:
         """
         table_name = DB_TABLE_NAME_SESSION_ID
-        columns = (f"{DB_COLUMN_NAME_FIRST_CLIENT} {DB_COLUMN_PROPERTY_INTEGER} {DB_COLUMN_PROPERTY_NOT_NULL}",
-                   f"{DB_COLUMN_NAME_SECOND_CLIENT} {DB_COLUMN_PROPERTY_INTEGER} {DB_COLUMN_PROPERTY_NOT_NULL}",
-                   f"{DB_COLUMN_NAME_SESSION_ID} {DB_COLUMN_PROPERTY_INTEGER} {DB_COLUMN_PROPERTY_NOT_NULL}")
+        columns = (f"{DB_COLUMN_NAME_SESSION_ID} {DB_COLUMN_PROPERTY_INTEGER} {DB_COLUMN_PROPERTY_NOT_NULL}",
+                   f"{DB_COLUMN_NAME_FIRST_CLIENT} {DB_COLUMN_PROPERTY_INTEGER} {DB_COLUMN_PROPERTY_NOT_NULL}",
+                   f"{DB_COLUMN_NAME_SECOND_CLIENT} {DB_COLUMN_PROPERTY_INTEGER} {DB_COLUMN_PROPERTY_NOT_NULL}")
         self.create_table_if_not_exist(table_name, columns)
 
     def add_message(self, sender_id: int, receiver_id: int, message: bytes) -> None:
@@ -166,6 +166,32 @@ class ServerMessageDatabase(MessageDatabase):
                       memoryview(message), memoryview(message_tag), memoryview(message_nonce))
         self.insert_into_table(tb_name, row_values)
 
+    def add_session_key_pair(self, session_id: int, id1: int, id2: int, key_encrypted_by_first_id: bytes,
+                             key_encrypted_by_second_id: bytes):
+        """
+        Добавление пары сессионных ключей в таблицу ключа в таблицу
+        !!! id1 < id2, сперва проверяем это условие и меняем местами id и keys, потом записываем в таблицу данные
+        сначала об id1, затем id2
+        :param session_id:
+        :param id1:
+        :param id2:
+        :param key_encrypted_by_first_id: симметричный сессионный ключ зашифрованный открытым ключом первого клиента
+        :param key_encrypted_by_second_id: аналогично для второго
+        :return:
+        """
+        if id1 > id2:
+            id1, id2 = id2, id1
+            key_encrypted_by_first_id, key_encrypted_by_second_id = \
+                key_encrypted_by_second_id, key_encrypted_by_first_id
+        tb_name = f"{DB_PREFIX_ENCRYPTED_KEYS}{DB_SEP}{id1}{DB_SEP}{id2}"
+
+        if not self.check_if_table_exist(tb_name):
+            self.create_session_keys_table(id1, id2)
+
+        row_values = (session_id, key_encrypted_by_first_id, key_encrypted_by_second_id)
+
+        self.insert_into_table(tb_name, row_values)
+
     def add_session_key(self, session_id: int, key_holder_id: int, second_id: int, encrypted_key: bytes) -> None:
         """
         Добавление сессионного ключа в таблицу
@@ -180,7 +206,7 @@ class ServerMessageDatabase(MessageDatabase):
                   f"{max(key_holder_id, second_id)}"
 
         if not self.check_if_table_exist(tb_name):
-            self.create_session_keys_table(key_holder_id, second_id)
+            self.create_session_keys_table({DB_PREFIX_ENCRYPTED_KEYS})
 
         # Проверяем, есть ли текущая session_id в таблице (тоесть один из общающихся, уже прислал свой ключ
         execute_str = f"SELECT {DB_GET_EVERYTHING} FROM {tb_name} WHERE {DB_COLUMN_NAME_SESSION_ID}=:session_id;"
@@ -265,7 +291,10 @@ class ServerMessageDatabase(MessageDatabase):
         self.cursor.execute(execute_str, {"id1": id1, "id2": id2})
         current_session_id = self.cursor.fetchone()
         if not current_session_id:
+            # нужно добавить новую запись в таблицу, иначе нечего будет обновлять
             current_session_id = 1
+            row_values = (current_session_id, id1, id2)
+            self.insert_into_table(DB_TABLE_NAME_SESSION_ID, row_values)
         else:
             current_session_id = current_session_id[DB_COLUMN_NAME_SESSION_ID]
         new_session_id = current_session_id + 1
