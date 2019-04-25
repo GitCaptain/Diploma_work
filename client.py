@@ -441,7 +441,7 @@ class Client:
             while key[beg] == b' ':
                 beg += 1
             while friend_encrypted_key[-1 - end] == b' ':
-                end+= 1
+                end += 1
             return beg, end
 
         friend_encrypted_key = RSA_encrypt(self.friendly_users[friend_id].public_key, key)
@@ -553,8 +553,9 @@ class ReceivedMessageManager:
                     pass
         elif command == USER_OFFLINE:
             # data = [.., 'id']
-            self.client.connector.stop_task()
-            print(f"Пользователь {data[1]} сейчас не в сети")
+            peer_id = int(data[1])
+            self.client.connector.stop_task(peer_id)
+            print(f"Пользователь {peer_id} сейчас не в сети")
         elif command == MESSAGE_FROM_DATABASE or command == SECRET_MESSAGE_FROM_DATABASE:
             self.add_message(data)
         elif command == MESSAGE_KEY_FROM_DATABASE:
@@ -564,7 +565,7 @@ class ReceivedMessageManager:
         elif command == SYMMETRIC_KEY:
             # data = [.., b'friend_id', b'key']
             friend_id = int(data[1])
-            encrypted_key = data[2]
+            encrypted_key = get_key_from_parts(data[2:])
             if friend_id not in self.client.friendly_users:
                 self.client.friendly_users[friend_id] = Friend(client_id=friend_id)
             friend = self.client.friendly_users[friend_id]
@@ -627,49 +628,6 @@ class ReceivedMessageManager:
         """
         self.session_keys.clear()
 
-"""
-class KeyExchanger:
-
-    def __init__(self, client: Client):
-        self.client = client
-        self.task_in_process = False
-        self.friend_id = None
-
-    def new_key_exchange_task(self, friend_id: int) -> bool:
-
-        can_start_new_task = True
-        self.client.lock.acquire()
-        if self.task_in_process:
-            can_start_new_task = False
-        else:
-            self.task_in_process = True
-        self.client.lock.release()
-        if not can_start_new_task:
-            return False
-
-        self.friend_id = friend_id
-        new_task = threading.Thread(target=self.run_task)
-        new_task.start()
-        return True
-
-    def run_task(self):
-
-        # в дальнейшем этот шаг будет не обязательным,
-        # так как любое взаимодействие будет производиться только с друзьями
-        if self.friend_id not in self.client.friendly_users:
-            self.client.add_friend(friend_id=self.friend_id)
-
-        while self.friend_id not in self.client.friendly_users and self.task_in_process:
-            pass
-
-        if not self.task_in_process:
-            return
-
-    def stop_task(self, friend_id: int):
-        if self.friend_id == friend_id:
-            self.task_in_process = False
-"""
-
 
 class Peer2PeerConnector:
     """
@@ -690,6 +648,7 @@ class Peer2PeerConnector:
         self.max_connection_attempts = 5
 
     def run_task(self) -> None:
+        print("Task started")
         message = Message(type=COMMAND, sender_id=self.client.id, receiver_id=SERVER_ID)
         command = CREATE_P2P_CONNECTION
 
@@ -828,7 +787,7 @@ class Peer2PeerConnector:
                 connected_peer = self.client.friendly_users[connected_id]
                 connected_peer.private_address = peer_private_address
                 connected_peer.public_address = peer_public_address
-                connected_peer.sock = final_socket
+                connected_peer.socket = final_socket
                 self.client.p2p_connected.add(connected_id)
                 connection_done = True
 

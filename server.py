@@ -76,7 +76,7 @@ class Server:
             second_peer_id = int(data[2])
             message = Message(type=COMMAND, sender_id=self.id, receiver_id=user.id)
             if second_peer_id not in self.authenticated_users:
-                message.message = str(USER_OFFLINE)
+                message.message = f"{USER_OFFLINE} {second_peer_id}"
                 send_message_to_client(user, message, user.symmetric_key)
                 return False
             second_peer = self.authenticated_users[second_peer_id]
@@ -86,7 +86,7 @@ class Server:
             if command_type == P2P_ADDRESS:
                 user_private_address = data[3], int(data[4])
                 message.message = f"{command_to_peer} {command_type} {user.id} " \
-                                  f"{user_public_address[0]} {user_public_address[1]} " \
+                                  f"{user.public_address[0]} {user.public_address[1]} " \
                                   f"{user_private_address[0]} {user_private_address[1]}"
             elif command_type == P2P_CONNECTION_TYPE:
                 message.message = f"{command_to_peer} {command_type} {user.id} {data[3]}"
@@ -287,8 +287,7 @@ class Server:
                 return
         if message.receiver_id in self.authenticated_users:
             receiver = self.authenticated_users[message.receiver_id]
-            message.message, message.tag, message.nonce = get_encrypted_message(message.message, receiver.symmetric_key)
-            send_message_to_client(receiver, message, receiver.symmetric_key)
+            send_message_to_client(receiver, message, receiver.symmetric_key, need_encrypt=not message.secret)
         if self.thread_locals.users_database.check_if_user_exist(user_id=message.receiver_id):
             if message.secret:
                 self.thread_locals.messages_database.add_secret_message(session_id=message.secret_session_id,
@@ -317,7 +316,7 @@ class Server:
         self.thread_locals.messages_database = ServerMessageDatabase()
         try:
             while True:
-                message = get_message_from_client(user, server=True)
+                message = get_message_from_client(user)
                 if not message:
                     break
 

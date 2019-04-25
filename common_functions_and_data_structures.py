@@ -38,7 +38,7 @@ class Message:
         return bool(self.message)
 
 
-BROKEN_MESSAGE = Message(type=MESSAGE_ERROR, sender_id=ID_ERROR, receiver_id=ID_ERROR)
+BROKEN_MESSAGE = Message(type=MESSAGE_ERROR, sender_id=ID_ERROR, receiver_id=ID_ERROR, message=b'corrupted message')
 
 
 def get_hash(string: bytes, saltl: bytes = b'', saltr: bytes = b'', hash_func=SHA256) -> bytes:
@@ -76,8 +76,8 @@ def get_encrypted_message(message: bytes, key: bytes, need_encrypt: bool = False
     return ciphertext, tag, nonce
 
 
-def get_decrypted_message(message: bytes, key: bytes, tag: bytes, nonce: bytes, need_decrypt: bool = False) -> \
-        bytes or int:
+def get_decrypted_message(message: bytes, key: bytes, tag: bytes, nonce: bytes, need_decrypt: bool = False) \
+        -> bytes or int:
     """
     Проверяет подпись и при необходимости расшифровывает сообщение
     :param message:
@@ -96,11 +96,11 @@ def get_decrypted_message(message: bytes, key: bytes, tag: bytes, nonce: bytes, 
             mac.update(message)
             mac.verify(tag)
     except ValueError:  # Сообщение повреждено при передаче
-        return MESSAGE_ERROR
+        return BROKEN_MESSAGE.message
     return message
 
 
-def get_message_from_client(user: User, server: bool = False) -> Message:
+def get_message_from_client(user: User) -> Message:
     """
     Получаем сообщение от user'a
     :param user:
@@ -159,23 +159,24 @@ def get_message_from_client(user: User, server: bool = False) -> Message:
                       message_nonce=nonce,
                       secret_session_id=secret_session_id)
 
-    """
-    if server:
-        print("server got:", message.message, "\nfrom", message.sender_id, "to", message.receiver_id)
-    """
     return message
 
 
-def get_prepared_message(message: Message, symmetric_key: bytes) -> (bytes, bytes, bytes, bytes):
+def get_prepared_message(message: Message, symmetric_key: bytes, need_encrypt: bool = True)\
+        -> (bytes, bytes, bytes, bytes):
     """
     Подготавливает сообщение к отправке, внося все необходимые данные
     :param message:
     :param symmetric_key:
+    :param need_encrypt: Смотри описание в send_message_to_client
     :return: Данные о сообщении (отправляются перед сообщением), зашифрованное (подписанное сообщение), его tag и nonce
     """
     message.message = get_bytes_string(message.message)
 
-    message.message, tag, nonce = get_encrypted_message(message.message, symmetric_key, need_encrypt=message.secret)
+    if need_encrypt:
+        message.message, message.tag, message.nonce = get_encrypted_message(message.message, symmetric_key,
+                                                                            need_encrypt=(message.secret and
+                                                                                          need_encrypt))
 
     message.length = len(message.message)
     message_data_str = f"{message.type} " \
@@ -183,8 +184,8 @@ def get_prepared_message(message: Message, symmetric_key: bytes) -> (bytes, byte
                        f"{message.receiver_id} " \
                        f"{message.sender_id} " \
                        f"{int(message.secret)} " \
-                       f"{len(tag)} " \
-                       f"{len(nonce)} " \
+                       f"{len(message.tag)} " \
+                       f"{len(message.nonce)} " \
                        f"{message.secret_session_id}"
 
     step = MESSAGE_DATA_SIZE-1
@@ -204,19 +205,22 @@ def get_prepared_message(message: Message, symmetric_key: bytes) -> (bytes, byte
     for i, part in enumerate(message_data):
         message_data[i] = get_bytes_string(part)
 
-    return message_data, message.message, tag, nonce
+    return message_data, message.message, message.tag, message.nonce
 
 
-def send_message_to_client(receiver: User, message: Message, key: bytes) -> None:
+def send_message_to_client(receiver: User, message: Message, key: bytes, need_encrypt: bool = True) -> None:
     """
     Отправляет сообщение клиенту
     :param receiver:
     :param message:
     :param key: симметричный ключ, известный отправителю и КОНЕЧНОМУ получателю
     (т.е. не серверу, а именно конечному клиенту, если это не сервер)
+    :param need_encrypt: параметр используемый ТОЛЬКО сервером, нужен, чтоб сервер не перешифровывал сообщения,
+    зашифрованные пользователем, тем самым ломая их. Для пользователя этот параметр всегда True,
+    для сервера может стать False. Используется внутри get_prepared_message
     :return:
     """
-    message_data, message, tag, nonce = get_prepared_message(message, key)
+    message_data, message, tag, nonce = get_prepared_message(message, key, need_encrypt)
     if not receiver.socket or not message_data:
         return
     for data_part in message_data:
