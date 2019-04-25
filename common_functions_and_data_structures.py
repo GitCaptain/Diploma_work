@@ -21,10 +21,9 @@ class Message:
     """
     Структура содержащая данные о сообщении
     """
-    def __init__(self, type: int, receiver_id: int, sender_id: int, length: int = 0, message: (bytes, str) = "",
-                 secret: bool = False, message_tag: bytes = b'', message_nonce: bytes = b'',
-                 secret_session_id: int = 0):
-        self.type = type
+    def __init__(self, mes_type: int, receiver_id: int, sender_id: int, length: int = 0, message: (bytes, str) = "",
+                 secret: bool = False, message_tag: bytes = b'', message_nonce: bytes = b''):
+        self.type = mes_type
         self.receiver_id = receiver_id
         self.length = length
         self.message = message
@@ -32,13 +31,12 @@ class Message:
         self.secret = secret
         self.tag = message_tag
         self.nonce = message_nonce
-        self.secret_session_id = secret_session_id
 
     def __bool__(self):
         return bool(self.message)
 
 
-BROKEN_MESSAGE = Message(type=MESSAGE_ERROR, sender_id=ID_ERROR, receiver_id=ID_ERROR, message=b'corrupted message')
+BROKEN_MESSAGE = Message(mes_type=MESSAGE_ERROR, sender_id=ID_ERROR, receiver_id=ID_ERROR, message=b'corrupted message')
 
 
 def get_hash(string: bytes, saltl: bytes = b'', saltr: bytes = b'', hash_func=SHA256) -> bytes:
@@ -104,11 +102,10 @@ def get_message_from_client(user: User) -> Message:
     """
     Получаем сообщение от user'a
     :param user:
-    :param server:
     :return: полученное сообщение
     """
     # служебное сообщение, с данными о клиентсвом сообщении
-    # message_data = b'message_type message_length receiver_id sender_id secret tag_length nonce_length secret_sess_id'
+    # message_data = b'message_type message_length receiver_id sender_id secret tag_length nonce_length'
     # После него получаем message, tag, nonce
     message_data = b""
     while True:
@@ -132,7 +129,6 @@ def get_message_from_client(user: User) -> Message:
     secret = int(message_data[4])
     tag_length = int(message_data[5])
     nonce_length = int(message_data[6])
-    secret_session_id = int(message_data[7])
 
     def recv_message(length):
         b_message = b""
@@ -149,15 +145,14 @@ def get_message_from_client(user: User) -> Message:
     tag = recv_message(tag_length)
     nonce = recv_message(nonce_length)
 
-    message = Message(type=message_type,
+    message = Message(mes_type=message_type,
                       receiver_id=receiver_id,
                       sender_id=sender_id,
                       length=message_length,
                       message=b_message,
                       secret=bool(secret),
                       message_tag=tag,
-                      message_nonce=nonce,
-                      secret_session_id=secret_session_id)
+                      message_nonce=nonce)
 
     return message
 
@@ -185,8 +180,7 @@ def get_prepared_message(message: Message, symmetric_key: bytes, need_encrypt: b
                        f"{message.sender_id} " \
                        f"{int(message.secret)} " \
                        f"{len(message.tag)} " \
-                       f"{len(message.nonce)} " \
-                       f"{message.secret_session_id}"
+                       f"{len(message.nonce)}"
 
     step = MESSAGE_DATA_SIZE-1
     message_data = []
@@ -252,19 +246,27 @@ def get_text_from_bytes_data(data: bytes) -> str:
     return data.decode(ENCODING)
 
 
-def get_key_from_parts(public_key_parts: list) -> bytes:
+def get_key_from_parts(spaces_at_begin: int, key_parts: list, spaces_at_end: int) -> bytes:
     """
-    Могло (а может и нет, но на всякий случай предусмотрим это) оказаться, что в public_key клиентa
-    оказался один или несколько пробелов, тогда во время data.split() public_key клиента распался
-    на несколько частей, которые необходимо склеить, вставив между ними пробел
-    :param public_key_parts: части на которые распался public_key
+    Могло оказаться, что в key клиентa оказался один или несколько пробелов, тогда во время data.split()
+    key клиента распался на несколько частей, которые необходимо склеить, вставив между ними пробел, а также добавив
+    пробелы в начале и конце ключа
+    :param spaces_at_begin: количество пробелов в начале ключа
+    :param key_parts: части на которые распался public_key
+    :param spaces_at_end: количество пробелов в конце ключа
     :return: собранный public_key
     """
-    return b' '.join(public_key_parts)
+    return (b' ' * spaces_at_begin) + b' '.join(key_parts) + (b' ' * spaces_at_end)
+
+
+def count_spaces_at_the_edges(key):
+    beg, end = 0, 0
+    while key[beg] == b' ':
+        beg += 1
+    while key[-1 - end] == b' ':
+        end += 1
+    return beg, end
 
 
 if __name__ == '__main__':
-    d, _ = get_prepared_message(Message(message="123", type="test" * 20))
-    print(*map(len, d))
-    print(d)
-
+    pass

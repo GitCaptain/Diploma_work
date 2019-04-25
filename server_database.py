@@ -238,7 +238,7 @@ class ServerMessageDatabase(MessageDatabase):
         :param get_secret: Нужны зашифрованные сообщения или обычные
         :return: sql.Row object - что-то типо tuple но чуть удобнее, задается в параметре self.cursor.row_factory
         """
-        if id1 < id2:
+        if id1 > id2:
             id1, id2 = id2, id1
         if get_secret:
             tb_name = f"{DB_PREFIX_SECRET_MESSAGES_HISTORY}{DB_SEP}"
@@ -274,7 +274,7 @@ class ServerMessageDatabase(MessageDatabase):
         self.cursor.execute(execute_str, {"session_id": session_id})
         return self.cursor.fetchone()
 
-    def get_and_update_current_session_id(self, id1: int, id2: int) -> int:
+    def get_new_session_id(self, id1: int, id2: int) -> int:
         """
         Получаем текущий current_session_id для клиентов id1 и id2, если их еще нет в таблице, то добавляем их
         с current_session_id = 1, если они уже есть, то возвращаем текущее значение, и увеличиваем его в таблице на 1
@@ -285,25 +285,37 @@ class ServerMessageDatabase(MessageDatabase):
         """
         if id1 > id2:
             id1, id2 = id2, id1
-        execute_str = f"SELECT {DB_COLUMN_NAME_SESSION_ID} " \
-                      f"FROM {DB_TABLE_NAME_SESSION_ID} " \
-                      f"WHERE {DB_COLUMN_NAME_FIRST_CLIENT}=:id1 and {DB_COLUMN_NAME_SECOND_CLIENT}=:id2;"
-        self.cursor.execute(execute_str, {"id1": id1, "id2": id2})
-        current_session_id = self.cursor.fetchone()
-        if not current_session_id:
+        current_session_id = self.get_current_session_id(id1, id2)
+        if current_session_id == 0:
             # нужно добавить новую запись в таблицу, иначе нечего будет обновлять
-            current_session_id = 1
             row_values = (current_session_id, id1, id2)
             self.insert_into_table(DB_TABLE_NAME_SESSION_ID, row_values)
-        else:
-            current_session_id = current_session_id[DB_COLUMN_NAME_SESSION_ID]
+
         new_session_id = current_session_id + 1
         execute_str = f"UPDATE {DB_TABLE_NAME_SESSION_ID} " \
                       f"SET {DB_COLUMN_NAME_SESSION_ID}=:new_session_id " \
                       f"WHERE {DB_COLUMN_NAME_FIRST_CLIENT}=:id1 and {DB_COLUMN_NAME_SECOND_CLIENT}=:id2;"
         self.cursor.execute(execute_str, {"new_session_id": new_session_id, "id1": id1, "id2": id2})
         self.database_connection.commit()
-        return current_session_id
+        return new_session_id
+
+    def get_current_session_id(self, id1: int, id2: int) -> int:
+        """
+        Получаем текущий current_session_id для клиентов id1 и id2
+        :param id1:
+        :param id2:
+        :return: session_id, если такой есть в таблице, иначе 0
+        """
+        if id1 > id2:
+            id1, id2 = id2, id1
+        execute_str = f"SELECT {DB_COLUMN_NAME_SESSION_ID} " \
+                      f"FROM {DB_TABLE_NAME_SESSION_ID} " \
+                      f"WHERE {DB_COLUMN_NAME_FIRST_CLIENT}=:id1 and {DB_COLUMN_NAME_SECOND_CLIENT}=:id2;"
+        self.cursor.execute(execute_str, {"id1": id1, "id2": id2})
+        current_session_id = self.cursor.fetchone()
+        if current_session_id:
+            return current_session_id[DB_COLUMN_NAME_SESSION_ID]
+        return 0
 
 
 class ServerUserDatabase(UserDatabase):

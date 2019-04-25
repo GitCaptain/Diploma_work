@@ -45,14 +45,14 @@ class ClientMessageDatabase(MessageDatabase):
             raise TypeError
         if not table_name:
             if secret_messages:
-                tb_name = f"{DB_PREFIX_SECRET_MESSAGES_HISTORY}{DB_SEP}"
+                table_name = f"{DB_PREFIX_SECRET_MESSAGES_HISTORY}{DB_SEP}"
             else:
-                tb_name = f"{DB_PREFIX_MESSAGE_HISTORY}{DB_SEP}"
-            tb_name += f"{friend_id}"
+                table_name = f"{DB_PREFIX_MESSAGE_HISTORY}{DB_SEP}"
+            table_name += f"{friend_id}"
 
         columns = (f"{DB_COLUMN_NAME_MESSAGE_RECEIVED} {DB_COLUMN_PROPERTY_INTEGER} {DB_COLUMN_PROPERTY_NOT_NULL}",
                    f"{DB_COLUMN_NAME_MESSAGE} {DB_COLUMN_PROPERTY_TEXT} {DB_COLUMN_PROPERTY_NOT_NULL}")
-        self.create_table_if_not_exist(tb_name, columns)
+        self.create_table_if_not_exist(table_name, columns)
 
     def add_message(self, friend_id: int, message_received: bool, message_secret: bool, message: str) -> None:
         """
