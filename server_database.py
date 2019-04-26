@@ -167,7 +167,7 @@ class ServerMessageDatabase(MessageDatabase):
         self.insert_into_table(tb_name, row_values)
 
     def add_session_key_pair(self, session_id: int, id1: int, id2: int, key_encrypted_by_first_id: bytes,
-                             key_encrypted_by_second_id: bytes):
+                             key_encrypted_by_second_id: bytes) -> None:
         """
         Добавление пары сессионных ключей в таблицу ключа в таблицу
         !!! id1 < id2, сперва проверяем это условие и меняем местами id и keys, потом записываем в таблицу данные

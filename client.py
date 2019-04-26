@@ -32,7 +32,7 @@ def RSA_decrypt(rsa_key: RSA.RsaKey, message: bytes) -> bytes:
     :param message:
     :return: расшифрованное сообщение
     """
-    cipher_rsa = PKCS1_OAEP.new(rsa_key)
+    cipher_rsa = PKCS1_OAEP.new(rsa_key, SHA256)
     return cipher_rsa.decrypt(message)
 
 
@@ -43,7 +43,7 @@ def RSA_encrypt(rsa_key: RSA.RsaKey, message: bytes) -> bytes:
     :param message:
     :return: зашифрованное сообщение
     """
-    cipher_rsa = PKCS1_OAEP.new(rsa_key)
+    cipher_rsa = PKCS1_OAEP.new(rsa_key, SHA256)
     return cipher_rsa.encrypt(message)
 
 
@@ -456,7 +456,8 @@ class Client:
         if auth_type == REGISTER_USER:
             public_key_bytes = self.public_key.export_key()
             beg, end = count_spaces_at_the_edges(public_key_bytes)
-            message.message += b' ' + beg + b' ' + end + b' ' + public_key_bytes
+            message.message += b' ' + get_bytes_string(f"{beg}") + b' ' + get_bytes_string(f"{end}") + b' ' \
+                               + public_key_bytes
         send_message_to_client(self.server, message, self.server.symmetric_key)
 
     def delete_account(self) -> None:
@@ -517,6 +518,8 @@ class ReceivedMessageManager:
 
         # session: key - для расшифровки секретных сообщений хранившихся в БД сервера
         self.session_keys = dict()
+        # для размещения информации о текущем секретном сообщении получаемом от сервера, пока оно не пришло полностью
+        self.current_secret_message_info = list()
 
     def handle(self, message: Message, p2p: bool):
 
@@ -544,16 +547,25 @@ class ReceivedMessageManager:
             sep = b' '
         else:
             sep = ' '
-        data = message.message.split(sep)
 
-        command = int(data[0])
-        if command == REGISTRATION_SUCCESS or command == AUTHENTICATION_SUCCESS: # переработать, вынести в отдельную функцию
+        if message.type != BYTES_COMMAND or \
+                (not message.message.startswith(get_bytes_string(f"{MESSAGE_FROM_DATABASE}")) and
+                 not message.message.startswith(get_bytes_string(f"{SECRET_MESSAGE_FROM_DATABASE}"))):
+            # Сообщения приходящие из БД сервера не надо разбивать на части, их потом сложно собрать
+            data = message.message.split(sep)
+            command = int(data[0])
+        else:
+            first_space = message.message.find(sep)
+            command = int(message.message[:first_space])
+            data = message.message
+
+        if command == REGISTRATION_SUCCESS or command == AUTHENTICATION_SUCCESS:  # переработать, вынести в функцию
             # data = [.., 'uid']
             uid = int(data[1])
             self.client.id = uid
             print("Вход в систему успешно выполнен, id:", uid)
             self.client.start_post_authentication_init()
-        elif command == USER_ALREADY_EXIST:  # переработать, вынести в отдельную функцию
+        elif command == USER_ALREADY_EXIST:  # переработать, вынести в функцию
             print("Пользователь с таким логином уже существует")
         elif command == NOT_AUTHENTICATED:
             print("Невозможно выполнить запрос, сперва необходимо зарегистрироваться или войти")
@@ -643,41 +655,79 @@ class ReceivedMessageManager:
         key = RSA_decrypt(self.client.private_key, encrypted_key)
         self.session_keys[session_id] = key
 
-    def add_message_from_server_database(self, message_info: list) -> None:
+    def add_message_from_server_database(self, message_info: bytes) -> None:
         """
         Добавляет сообщения пришедшие из БД сервера в список сообщений пользователя
-        :param message_info: [b'type', b'sender', b'receiver'[, b'session_id'], b'message'[, b'tag', b'nonce']] -
-                                список данных о сообщении пришедшем с сервера
+        :param message_info: строка байт данных о сообщении пришедшем с сервера, может быть нескольких видов:
+        1) b'MESSAGE_FROM_DATABASE sender_id receiver_id message'
+        2) b'SECRET_MESSAGE_FROM_DATABASE data sender_id receiver_id session_id'
+        3) b'SECRET_MESSAGE_FROM_DATABASE mes message'
+        4) b'SECRET_MESSAGE_FROM_DATABASE tag tag'
+        5) b'SECRET_MESSAGE_FROM_DATABASE nonce nonce'
+        Если пришло сообщение первого типа, можно сразу добавлять его в список сообщений,
+        остальные 4 сообщения должны приходить подряд и добавить сообщение можно будет только
+        когда придет последнее
         :return:
         """
-        is_secret = (int(message_info[0]) == SECRET_MESSAGE_FROM_DATABASE)
-        sender_id = int(message_info[1])
-        receiver_id = int(message_info[2])
 
-        if self.client.id == sender_id:
-            friend_id = receiver_id
-            sender = True
-        else:
-            friend_id = sender_id
-            sender = False
-
-        if is_secret:
-            session_id = message_info[3]
-            message_pos = 4
-            message = message_info[message_pos]
-            tag = message_info[5]
-            nonce = message_info[6]
-            message = get_decrypted_message(message, self.session_keys[session_id], tag, nonce)
-        else:
-            message_pos = 3
-            message = message_info[message_pos]
-
-        message = message_item(sender, get_text_from_bytes_data(message))
-
-        if is_secret:
-            self.client.friendly_users[friend_id].secret_chat.append(message)
-        else:
+        sep_pos = message_info.find(b' ')
+        mes_type = int(message_info[:sep_pos])
+        message_info = message_info[sep_pos+1:]
+        if mes_type == MESSAGE_FROM_DATABASE:
+            # Елси сообщение не секретное, то сразу добавляем его и выходим
+            sep_pos = message_info.find(b' ')
+            sender_id = int(message_info[:sep_pos])
+            message_info = message_info[sep_pos+1:]
+            sep_pos = message_info.find(b' ')
+            receiver_id = int(message_info[:sep_pos])
+            message = message_info[sep_pos+1:]
+            if self.client.id == sender_id:
+                sender = True
+                friend_id = receiver_id
+            else:
+                sender = False
+                friend_id = sender_id
+            message = message_item(sender, get_text_from_bytes_data(message))
             self.client.friendly_users[friend_id].chat.append(message)
+            return
+
+        # сообщение - секретное
+        sep_pos = message_info.find(b' ')
+        secret_type = message_info[:sep_pos]
+        message_info = message_info[sep_pos+1:]
+        if secret_type == b'data':
+            # sender_id, receiver_id, session_id, message, tag, nonce
+            self.current_secret_message_info = [None for _ in range(6)]
+            # тут можно делать split
+            self.current_secret_message_info[:3] = map(int, message_info.split(b' '))  # -> sender, receiver, session_id
+        elif secret_type == b'mes':
+            self.current_secret_message_info[3] = message_info
+        elif secret_type == b'tag':
+            self.current_secret_message_info[4] = message_info
+        elif secret_type == b'nonce':
+            # все данные получены, теперь надо добавить сообщение в список
+            self.current_secret_message_info[5] = message_info
+
+            sender_id = int(self.current_secret_message_info[0])
+            receiver_id = int(self.current_secret_message_info[1])
+
+            if self.client.id == sender_id:
+                sender = True
+                friend_id = receiver_id
+            else:
+                sender = False
+                friend_id = sender_id
+
+            session_id = int(self.current_secret_message_info[2])
+            message = self.current_secret_message_info[3]
+            tag = self.current_secret_message_info[4]
+            nonce = self.current_secret_message_info[5]
+            message = get_decrypted_message(message, self.session_keys[session_id], tag, nonce, True)
+            message = get_text_from_bytes_data(message)
+            self.client.friendly_users[friend_id].secret_chat.append(message_item(sender, message))
+        else:
+            # такого быть не должно
+            pass
 
     def clear(self) -> None:
         """
@@ -685,6 +735,7 @@ class ReceivedMessageManager:
         Удаляем session_keys, cipher_rsa
         :return:
         """
+        self.current_secret_message_info.clear()
         self.session_keys.clear()
 
 

@@ -123,8 +123,8 @@ class Server:
             if peer_id in self.authenticated_users:
                 receiver = self.authenticated_users[peer_id]
                 message = Message(mes_type=BYTES_COMMAND, receiver_id=receiver.id, sender_id=SERVER_ID)
-                beg, end = count_spaces_at_the_edges(peer_encrypted_key)
-                message.message = get_bytes_string(f"{SYMMETRIC_KEY} {user.id} {beg} {end} ") + peer_encrypted_key
+                message.message = get_bytes_string(f"{SYMMETRIC_KEY} {user.id} {peer_beg} {peer_end} ") \
+                                  + peer_encrypted_key
                 send_message_to_client(receiver, message, receiver.symmetric_key)
 
             return True
@@ -188,11 +188,13 @@ class Server:
         message_generator = self.thread_locals.messages_database.get_message_history(user.id, users_friend_id, True)
         session_id = -1  # несуществующая сессия
         message = Message(mes_type=BYTES_COMMAND, sender_id=self.id, receiver_id=user.id)
+        # нужно еще одно подключение к БД сообщений, т.к. мы одновременно получаем и сообщения и ключи из разных таблиц
+        session_key_db_connection = ServerMessageDatabase()
         for db_mes in message_generator:  # db_mes = (ses_id:int, from:int, to:int, mes:bytes, tag:bytes, nonce:bytes)
             if db_mes[DB_COLUMN_NAME_SESSION_ID] != session_id:
                 mes = Message(mes_type=BYTES_COMMAND, sender_id=self.id, receiver_id=user.id)
                 session_id = db_mes[DB_COLUMN_NAME_SESSION_ID]
-                session_key = self.thread_locals.messages_database.get_session_key(session_id, user.id, users_friend_id)
+                session_key = session_key_db_connection.get_session_key(session_id, user.id, users_friend_id)
                 if user.id < users_friend_id:
                     session_key = session_key[0]
                 else:
@@ -200,11 +202,19 @@ class Server:
                 beg, end = count_spaces_at_the_edges(session_key)
                 mes.message = get_bytes_string(f"{MESSAGE_KEY_FROM_DATABASE} {session_id} {beg} {end} ") + session_key
                 send_message_to_client(user, mes, user.symmetric_key)
-            message.message = get_bytes_string(f"{SECRET_MESSAGE_FROM_DATABASE} {db_mes[DB_COLUMN_NAME_SENDER_ID]} "
-                                               f"{db_mes[DB_COLUMN_NAME_RECEIVER_ID]} {session_id} ") \
-                              + db_mes[DB_COLUMN_NAME_MESSAGE] + b' '\
-                              + db_mes[DB_COLUMN_NAME_MESSAGE_TAG] + b' '\
-                              + db_mes[DB_COLUMN_NAME_MESSAGE_NONCE]
+            # отправляем 4 сообщения подряд с инфо о сообщении, самим сообщением, затем его тег и нонс, чтоб клиент смог
+            # их восстановить (хз как восстанавливать, если отправлять их одним сообщением)
+            message.message = get_bytes_string(f"{SECRET_MESSAGE_FROM_DATABASE} data "
+                                               f"{db_mes[DB_COLUMN_NAME_SENDER_ID]} "
+                                               f"{db_mes[DB_COLUMN_NAME_RECEIVER_ID]} {session_id}")
+            send_message_to_client(user, message, user.symmetric_key)
+            message.message = get_bytes_string(f"{SECRET_MESSAGE_FROM_DATABASE} mes ") + db_mes[DB_COLUMN_NAME_MESSAGE]
+            send_message_to_client(user, message, user.symmetric_key)
+            message.message = get_bytes_string(f"{SECRET_MESSAGE_FROM_DATABASE} tag ") + \
+                              db_mes[DB_COLUMN_NAME_MESSAGE_TAG]
+            send_message_to_client(user, message, user.symmetric_key)
+            message.message = get_bytes_string(f"{SECRET_MESSAGE_FROM_DATABASE} nonce ") + \
+                              db_mes[DB_COLUMN_NAME_MESSAGE_NONCE]
             send_message_to_client(user, message, user.symmetric_key)
 
     def client_registration(self, user: User, login: bytes, password: bytes, spaces_at_begin: int, spaces_at_end: int,
@@ -274,7 +284,7 @@ class Server:
 
     def process_message(self, message: Message) -> None:
         """
-        пересылает сообщение message.message от message.sender_id к mesage.receiver_id, а также добавляет это сообщение
+        пересылает сообщение message от message.sender_id к mesage.receiver_id, а также добавляет это сообщение
         в БД
         :param message:
         :return:
