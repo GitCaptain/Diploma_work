@@ -100,6 +100,8 @@ class Database:
         self.cursor.execute("SELECT * FROM test1")
         return self.cursor.fetchall()
 
+# TODO Нормальное наследование
+
 
 class UserDatabase(Database):
     """

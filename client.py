@@ -60,6 +60,8 @@ class Friend(User):
     def __init__(self, sock: socket.socket = None, client_id: int = 0, public_address: 'tuple(str, int)' = None,
                  private_address: 'tuple(str, int)' = None, login: str = '', symmetric_key: bytes = None,
                  public_key: RSA.RsaKey = None, secret_session_id: int = None):
+        # TODO super().__init__(self, sock=sock, client_id=client_id, public_address=public_address,
+        # symmetric_key=symmetric_key) - нормальное наследование
         super().__init__(sock=sock, client_id=client_id, public_address=public_address, symmetric_key=symmetric_key)
         self.login = login
         self.private_address = private_address
@@ -480,7 +482,9 @@ class Client:
 
         self.connector.new_connection_task(user_id, initiator=creator)
 
+
     def symmetric_key_exchange_with_friend(self, friend_id: int) -> None:
+        # TODO: Сделать так, чтоб при одновременном обмене ключом ничего не ломалось.
         """
         Создаем ключ, для секретноей переписки с другом (без разницы P2P или через сервер), шифруем его открыты ключом
         друга и отсылаем ему через сервер
@@ -852,6 +856,7 @@ class Peer2PeerConnector:
 
             listener = selector.select(timeout=1)  # wait 1 sec at most
 
+            # TODO процедура проверки правильности подключения
             if listener:  # Входящее соединение
                 # listener = [(), ..]
                 listener = listener[0][0].fileobj  # self.p2p_listener

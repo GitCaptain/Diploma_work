@@ -39,6 +39,9 @@ DB_COLUMN_PROPERTY_NOT_NULL = "NOT NULL"
 DB_COLUMN_PROPERTY_PRIMARY_KEY = "PRIMARY KEY"
 
 
+# TODO Нормальное наследование
+
+
 class ServerMessageDatabase(MessageDatabase):
     """
     Класс для работы с базой данных сообщений хранящихся на сервере,
