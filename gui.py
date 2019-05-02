@@ -1,7 +1,11 @@
 from tkinter import *
+from tkinter.messagebox import *
+from constants import *
 
 MESSENGER_NAME = "deep low moan"
 
+AUTHENTICATION_HANDLERS = 'auth'
+MAIN_WINDOW_HANDLERS = 'main'
 HANDLER_REGISTER = 'register'
 HANDLER_ENTER = 'enter'
 
@@ -70,6 +74,7 @@ class FrameWithScrolledListBox(Frame):
 
 
 TEMPLATE_STRING = 'templatestring'
+CLEAR_ON_RETURN = 'clearonreturn'
 
 
 class EntryWithTemplateString(Entry):
@@ -81,13 +86,17 @@ class EntryWithTemplateString(Entry):
         else:
             self.template = ''
 
+        if CLEAR_ON_RETURN in kwargs:
+            self.clear_on_ret = kwargs.pop(CLEAR_ON_RETURN)
+        else:
+            self.clear_on_ret = False
+
         super().__init__(master, kwargs)
         self.template_stated = False
         self.insert_template_string()
 
         self.bind('<Key>', self.delete_template_string)
         self.bind('<Button-1>', self.delete_template_string)
-        self.bind('<FocusOut>', self.insert_template_string)
         self.bind('<Return>', self._get)
 
     def delete_template_string(self, *arg):
@@ -104,7 +113,8 @@ class EntryWithTemplateString(Entry):
 
     def _get(self, *arg):
         res = self.get()
-        self.insert_template_string()
+        if self.clear_on_ret:
+            self.insert_template_string()
         return res
 
 
@@ -124,7 +134,7 @@ class GUI:
         self.root.geometry("280x140")
         self.root.resizable(width=False, height=False)
 
-        self.login_window = LoginWindow(self.root)
+        self.login_window = LoginWindow(self.root, handlers=self.handlers[AUTHENTICATION_HANDLERS])
         self.login_window.pack(fill=BOTH, expand=YES)
 
     def prepare_main_window(self):
@@ -143,6 +153,7 @@ class GUI:
         pass
 
     def run(self):
+        self.prepare_authentication_window()
         self.root.mainloop()
 
     def clear_root(self):
@@ -156,9 +167,10 @@ class GUI:
 
 class LoginWindow(Frame):
 
-    def __init__(self, master=None, **kwargs):
+    def __init__(self, master=None, handlers=None, **kwargs):
         super().__init__(master, kwargs)
 
+        self.handlers = handlers
         self.auth_window = Frame(self)
         self.auth_window.pack(expand=YES, fill=BOTH)
 
@@ -182,9 +194,19 @@ class LoginWindow(Frame):
 
         self.enter_button = PixelSizedButton(self.auth_window, width=button_width, height=button_height, text='Вход')
         self.enter_button.pack(side=TOP, expand=YES)
+        self.set_handlers()
 
-    def set_handlers(self, handlers):
-        pass
+    def set_handlers(self):
+        self.register_button.config(command=(lambda: self.get_registration_data(REGISTER_USER)))
+        self.enter_button.config(command=(lambda: self.get_registration_data(LOG_IN)))
+
+    def get_registration_data(self, auth_type):
+        password = self.password_var.get()
+        login = self.login_var.get()
+        if not password or not login:
+            showerror('Некорректный ввод', 'Заполните все поля')
+            return
+        self.handlers[HANDLER_REGISTER](login, password, auth_type)
 
 
 class MainWindow(Frame):
@@ -283,5 +305,4 @@ class MainWindow(Frame):
 if __name__ == '__main__':
     a = {HANDLER_ENTER: None, HANDLER_REGISTER: None}
     a = GUI(a)
-    a.prepare_main_window()
     a.run()

@@ -75,7 +75,7 @@ class Friend(User):
 
 class Client:
 
-    def __init__(self, server_hostname: str = 'localhost'):
+    def __init__(self, server_hostname: str = 'localhost', gui=None):
 
         secure_server_tcp_socket = self.connect_and_auth_server((server_hostname, PORT_TO_CONNECT))
         # основной сокет для работы с сервером
@@ -83,7 +83,7 @@ class Client:
 
         # сокет для UDP подключений от других клиентов, в случае если не удается установить TCP соединение
         # self.udp_socket = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
-
+        self.gui = gui
         self.p2p_tcp_connection_possible = True
         try:
             if sys.platform.startswith('linux') or sys.platform.startswith('darwin'):  # linux, Mac OS, android
@@ -377,7 +377,7 @@ class Client:
             return
         message_type = int(user_input)
         if message_type == REGISTER_USER or message_type == LOG_IN:
-            self.log_in(message_type)
+            self.ask_registration_data(message_type)
         elif message_type == DELETE_USER:
             self.delete_account()
         elif message_type == ADD_FRIEND_BY_LOGIN or message_type == ADD_FRIEND_BY_ID:
@@ -442,15 +442,18 @@ class Client:
 
         send_message_to_client(self.server, message, self.server.symmetric_key)
 
-    def log_in(self, auth_type: int) -> None:
+    def ask_registration_data(self, auth_type: int):
         if self.id:
             print("Вы уже вошли")
             return
-        message = Message(mes_type=BYTES_COMMAND, sender_id=self.id, receiver_id=SERVER_ID, secret=True)
         login = get_input("Введите логин\n")
         password = get_input("Введите пароль\n")
-        if not login or not password:
+        self.log_in(login, password, auth_type)
+
+    def log_in(self, login: str, password: str, auth_type: int) -> None:
+        if self.id:
             return
+        message = Message(mes_type=BYTES_COMMAND, sender_id=self.id, receiver_id=SERVER_ID, secret=True)
         self.login = login
         message.message = get_bytes_string(f"{auth_type} {login} {password}")
         if auth_type == REGISTER_USER:
