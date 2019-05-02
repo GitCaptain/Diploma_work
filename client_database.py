@@ -23,8 +23,6 @@ DB_COLUMN_PROPERTY_INTEGER = "INTEGER"
 DB_COLUMN_PROPERTY_NOT_NULL = "NOT NULL"
 DB_COLUMN_PROPERTY_PRIMARY_KEY = "PRIMARY KEY"
 
-# TODO Нормальное наследование
-
 
 class ClientMessageDatabase(MessageDatabase):
     """

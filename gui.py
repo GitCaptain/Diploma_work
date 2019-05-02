@@ -15,7 +15,7 @@ class PixelSizedButton(Button):
             self.img = kwargs['image']
         else:
             self.img = PhotoImage()
-        Button.__init__(self, master, image=self.img, compound=CENTER, **kwargs)
+        super().__init__(master, image=self.img, compound=CENTER, **kwargs)
 
 
 class PixelSizedLabel(Label):
@@ -27,7 +27,7 @@ class PixelSizedLabel(Label):
             self.img = kwargs['image']
         else:
             self.img = PhotoImage()
-        Label.__init__(self, master, image=self.img, compound=CENTER, **kwargs)
+        super().__init__(master, image=self.img, compound=CENTER, **kwargs)
 
 
 SCROLLBAR_SIDE = 'scrollbarside'
@@ -50,7 +50,7 @@ class FrameWithScrolledListBox(Frame):
         else:
             self.lbside = RIGHT
 
-        Frame.__init__(self, master, kwargs)
+        super().__init__(master, kwargs)
 
         if not scrollbar:
             self.scrollbar = Scrollbar(self)
@@ -81,7 +81,7 @@ class EntryWithTemplateString(Entry):
         else:
             self.template = ''
 
-        Entry.__init__(self, master, kwargs)
+        super().__init__(master, kwargs)
         self.template_stated = False
         self.insert_template_string()
 
@@ -115,42 +115,17 @@ class GUI:
         self.root.title(MESSENGER_NAME)
         self.handlers = handlers
 
+        self.login_window = None
+        self.main_window = None
+
     def prepare_authentication_window(self):
 
         self.clear_root()
         self.root.geometry("280x140")
         self.root.resizable(width=False, height=False)
 
-        auth_window = Frame(self.root)
-        auth_window.pack(expand=YES, fill=BOTH)
-
-        entry_width = 100
-        button_width = 100
-        button_height = 40
-        login_var = StringVar()
-        login_entry = Entry(auth_window, width=entry_width)
-        login_entry.config(textvariable=login_var)
-        login_entry.pack(side=TOP, expand=YES)
-
-        password_var = StringVar()
-        password_entry = Entry(auth_window, width=entry_width)
-        password_entry.config(textvariable=password_var)
-        password_entry.pack(side=TOP, expand=YES)
-
-        register_button = PixelSizedButton(auth_window, width=button_width, height=button_height)
-        #register_button.config(text="Регистрация", command=(lambda: self.handlers[REGISTER](login_var, password_var)))
-        register_button.config(command=(lambda: self.on_success_auth()))
-        register_button.pack(side=TOP, expand=YES)
-
-        enter_button = PixelSizedButton(auth_window, width=button_width, height=button_height)
-        enter_button.config(text="Вход", command=(lambda: self.handlers[HANDLER_ENTER](login_var, password_var)))
-        enter_button.pack(side=TOP, expand=YES)
-
-    def on_success_auth(self):
-        self.prepare_main_window()
-
-    def on_fail_auth(self):
-        pass
+        self.login_window = LoginWindow(self.root)
+        self.login_window.pack(fill=BOTH, expand=YES)
 
     def prepare_main_window(self):
 
@@ -158,88 +133,14 @@ class GUI:
         self.root.geometry("600x400")
         self.root.resizable(width=True, height=True)
 
-        # ----------------------------- верхняя полоска settings
-        settings_frame_height = 20
-        settings_frame = Frame(self.root, height=settings_frame_height)
-        settings_frame.pack(side=TOP, fill=X, anchor=N)
+        self.main_window = MainWindow(self.root)
+        self.main_window.pack(fill=BOTH, expand=YES)
 
-        settings_button_width = 100
-        settings_entry_width = 20
-        padx = 5
+    def on_success_auth(self):
+        self.prepare_main_window()
 
-        filler = PixelSizedLabel(settings_frame, width=14)
-        filler.pack(side=LEFT, fill=Y)
-
-        add_var = StringVar()
-        add_entry = EntryWithTemplateString(settings_frame, textvariable=add_var, width=settings_entry_width,
-                                            templatestring='логин: ')
-        add_entry.pack(side=LEFT, fill=Y)
-
-        add_button = PixelSizedButton(settings_frame, width=settings_button_width, text='Добавить друга')
-        add_button.pack(side=LEFT, fill=Y, padx=padx)
-
-        exit_button = PixelSizedButton(settings_frame, width=settings_button_width, text='Выйти из аккаунта')
-        exit_button.pack(side=RIGHT, fill=Y)
-
-        delete_button = PixelSizedButton(settings_frame, width=settings_button_width, text='Удалить аккаунт')
-        delete_button.pack(side=RIGHT, fill=Y, padx=padx)
-        # ----------------------------- верхняя полоска settings
-
-        # ----------------------------- основной frame
-        main_frame = Frame(self.root)
-        main_frame.pack(side=TOP, fill=BOTH, expand=YES, anchor=N)
-        # ----------------------------- основной frame
-
-        # ----------------------------- Frame со списком друзей
-        friend_list_width = 40
-        friend_list = FrameWithScrolledListBox(main_frame, scrollbarside=LEFT, listboxside=RIGHT,
-                                               width=friend_list_width)
-        friend_list.pack(side=LEFT, fill=Y)
-        # ----------------------------- Frame со списком друзей
-
-        # ----------------------------- Frame все связанное с чатом
-        chat_frame = Frame(main_frame)
-        chat_frame.pack(side=RIGHT, fill=BOTH, expand=YES)
-        # ----------------------------- Frame все связанное с чатом
-
-        # ----------------------------- метка чата с пользователем
-        label_friend_name = Label(chat_frame, text="чат с: ", anchor=W)
-        label_friend_name.pack(side=TOP, fill=X)
-        # ----------------------------- метка чата с пользователем
-
-        # ----------------------------- выбор чата
-        chat_type_select_frame = Frame(chat_frame)
-        chat_type_select_frame.pack(side=TOP, fill=X)
-
-        chat_button = PixelSizedButton(chat_type_select_frame, text="сообщения")
-        chat_button.pack(side=LEFT, fill=Y)
-
-        secret_chat_button = PixelSizedButton(chat_type_select_frame, text="секретные сообщения")
-        secret_chat_button.pack(side=LEFT, fill=Y)
-
-        p2p_chat_button = PixelSizedButton(chat_type_select_frame, text="p2p сообщения")
-        p2p_chat_button.pack(side=LEFT, fill=Y)
-
-        secret_p2p_chat_button = PixelSizedButton(chat_type_select_frame, text="секретные p2p сообщения")
-        secret_p2p_chat_button.pack(side=LEFT, fill=Y)
-        # ----------------------------- выбор чата
-
-        # ----------------------------- окно чата
-        dialog_frame = FrameWithScrolledListBox(chat_frame, scrollbarside=RIGHT, listboxside=LEFT)
-        dialog_frame.pack(side=TOP, fill=BOTH, expand=YES)
-        # ----------------------------- окно чата
-
-        # ----------------------------- ввод сообщения
-        message_frame_height = 20
-        message_frame = Frame(chat_frame, height=message_frame_height)
-        message_frame.pack(side=BOTTOM, fill=X)
-
-        message_entry = EntryWithTemplateString(message_frame, templatestring='Введите сообщение:')
-        message_entry.pack(side=LEFT, fill=BOTH, expand=YES)
-
-        send_button = PixelSizedButton(message_frame, text='отослать')
-        send_button.pack(side=RIGHT)
-        # ----------------------------- ввод сообщения
+    def on_fail_auth(self):
+        pass
 
     def run(self):
         self.root.mainloop()
@@ -251,6 +152,132 @@ class GUI:
         """
         for e in self.root.slaves():
             e.destroy()
+
+
+class LoginWindow(Frame):
+
+    def __init__(self, master=None, **kwargs):
+        super().__init__(master, kwargs)
+
+        self.auth_window = Frame(self)
+        self.auth_window.pack(expand=YES, fill=BOTH)
+
+        entry_width = 100
+        button_width = 100
+        button_height = 40
+        self.login_var = StringVar()
+        self.login_entry = EntryWithTemplateString(self.auth_window, width=entry_width, **{TEMPLATE_STRING: 'логин:'})
+        self.login_entry.config(textvariable=self.login_var)
+        self.login_entry.pack(side=TOP, expand=YES)
+
+        self.password_var = StringVar()
+        self.password_entry = EntryWithTemplateString(self.auth_window, width=entry_width,
+                                                      **{TEMPLATE_STRING: 'пароль:'})
+        self.password_entry.config(textvariable=self.password_var)
+        self.password_entry.pack(side=TOP, expand=YES)
+
+        self.register_button = PixelSizedButton(self.auth_window, width=button_width, height=button_height,
+                                                text='Регистрация')
+        self.register_button.pack(side=TOP, expand=YES)
+
+        self.enter_button = PixelSizedButton(self.auth_window, width=button_width, height=button_height, text='Вход')
+        self.enter_button.pack(side=TOP, expand=YES)
+
+    def set_handlers(self, handlers):
+        pass
+
+
+class MainWindow(Frame):
+
+    def __init__(self, master=None, **kwargs):
+        super().__init__(master, kwargs)
+
+        # ----------------------------- верхняя полоска settings
+        settings_frame_height = 20
+        self.settings_frame = Frame(self, height=settings_frame_height)
+        self.settings_frame.pack(side=TOP, fill=X, anchor=N)
+
+        settings_button_width = 100
+        settings_entry_width = 20
+        padx = 5
+
+        self.filler = PixelSizedLabel(self.settings_frame, width=14)
+        self.filler.pack(side=LEFT, fill=Y)
+
+        self.add_var = StringVar()
+        self.add_entry = EntryWithTemplateString(self.settings_frame, textvariable=self.add_var,
+                                                 width=settings_entry_width,
+                                                 templatestring='логин: ')
+        self.add_entry.pack(side=LEFT, fill=Y)
+
+        self.add_button = PixelSizedButton(self.settings_frame, width=settings_button_width, text='Добавить друга')
+        self.add_button.pack(side=LEFT, fill=Y, padx=padx)
+
+        self.exit_button = PixelSizedButton(self.settings_frame, width=settings_button_width, text='Выйти из аккаунта')
+        self.exit_button.pack(side=RIGHT, fill=Y)
+
+        self.delete_button = PixelSizedButton(self.settings_frame, width=settings_button_width, text='Удалить аккаунт')
+        self.delete_button.pack(side=RIGHT, fill=Y, padx=padx)
+        # ----------------------------- верхняя полоска settings
+
+        # ----------------------------- основной frame
+        self.main_frame = Frame(self)
+        self.main_frame.pack(side=TOP, fill=BOTH, expand=YES, anchor=N)
+        # ----------------------------- основной frame
+
+        # ----------------------------- Frame со списком друзей
+        friend_list_width = 40
+        self.friend_list = FrameWithScrolledListBox(self.main_frame, scrollbarside=LEFT, listboxside=RIGHT,
+                                               width=friend_list_width)
+        self.friend_list.pack(side=LEFT, fill=Y)
+        # ----------------------------- Frame со списком друзей
+
+        # ----------------------------- Frame все связанное с чатом
+        self.chat_frame = Frame(self.main_frame)
+        self.chat_frame.pack(side=RIGHT, fill=BOTH, expand=YES)
+        # ----------------------------- Frame все связанное с чатом
+
+        # ----------------------------- метка чата с пользователем
+        self.label_friend_name = Label(self.chat_frame, text="чат с: ", anchor=W)
+        self.label_friend_name.pack(side=TOP, fill=X)
+        # ----------------------------- метка чата с пользователем
+
+        # ----------------------------- выбор чата
+        self.chat_type_select_frame = Frame(self.chat_frame)
+        self.chat_type_select_frame.pack(side=TOP, fill=X)
+
+        self.chat_button = PixelSizedButton(self.chat_type_select_frame, text="сообщения")
+        self.chat_button.pack(side=LEFT, fill=Y)
+
+        self.secret_chat_button = PixelSizedButton(self.chat_type_select_frame, text="секретные сообщения")
+        self.secret_chat_button.pack(side=LEFT, fill=Y)
+
+        self.p2p_chat_button = PixelSizedButton(self.chat_type_select_frame, text="p2p сообщения")
+        self.p2p_chat_button.pack(side=LEFT, fill=Y)
+
+        self.secret_p2p_chat_button = PixelSizedButton(self.chat_type_select_frame, text="секретные p2p сообщения")
+        self.secret_p2p_chat_button.pack(side=LEFT, fill=Y)
+        # ----------------------------- выбор чата
+
+        # ----------------------------- окно чата
+        self.dialog_frame = FrameWithScrolledListBox(self.chat_frame, scrollbarside=RIGHT, listboxside=LEFT)
+        self.dialog_frame.pack(side=TOP, fill=BOTH, expand=YES)
+        # ----------------------------- окно чата
+
+        # ----------------------------- ввод сообщения
+        message_frame_height = 20
+        self.message_frame = Frame(self.chat_frame, height=message_frame_height)
+        self.message_frame.pack(side=BOTTOM, fill=X)
+
+        self.message_entry = EntryWithTemplateString(self.message_frame, templatestring='Введите сообщение:')
+        self.message_entry.pack(side=LEFT, fill=BOTH, expand=YES)
+
+        self.send_button = PixelSizedButton(self.message_frame, text='отослать')
+        self.send_button.pack(side=RIGHT)
+        # ----------------------------- ввод сообщения
+
+    def set_handlers(self):
+        pass
 
 
 if __name__ == '__main__':
