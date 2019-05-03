@@ -41,6 +41,11 @@ GET_MESSAGES = 7
 CREATE_P2P_CONNECTION = 8
 SYMMETRIC_KEY_EXCHANGE = 9
 
+# command for client and gui, they must not intersect
+FRIEND_ITEM = -1
+INIT_DONE = -2
+MESSAGE_ITEM = -3
+
 # Server response
 WRONG_LOGIN = 1
 WRONG_PASSWORD = 2

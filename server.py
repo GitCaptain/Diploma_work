@@ -159,7 +159,6 @@ class Server:
             beg, end = count_spaces_at_the_edges(key)
             message_to_user.message = get_bytes_string(f"{FRIEND_DATA} {friend_data[DB_COLUMN_NAME_USER_ID]} ") + \
                                       friend_data[DB_COLUMN_NAME_USER_LOGIN] + get_bytes_string(f" {beg} {end} ") + key
-            print(message_to_user.message)
         send_message_to_client(user, message_to_user, user.symmetric_key)
 
     def send_usual_message_history(self, user: User, users_friend_id: int) -> None:
