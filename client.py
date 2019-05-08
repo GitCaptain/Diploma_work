@@ -83,9 +83,38 @@ class Client:
         """
 
         self.event_queue = event_queue
-        secure_server_tcp_socket = self.connect_and_auth_server((server_hostname, PORT_TO_CONNECT))
+        self.server_hostname = server_hostname
+        self.friendly_users = dict()  # id: Friend
+        self.p2p_connected = set()  # id's of connected friends
+        self.id = USER_NOT_AUTHENTICATED  # не аутентифицирован
+        self.p2p_tcp_connection_possible = None
+        self.private_tcp_address = None
+        self.server = None
+        self.login = None
+        self.p2p_tcp_listener = None
+        self.max_listen_queue = 0
+        self.lock = threading.Lock()
+        self.thread_locals = threading.local()
+        self.connector = Peer2PeerConnector(self)
+        self.public_key = self.private_key = None
+
+    def run(self) -> None:
+        self.main_init()
+        server_handler_thread = threading.Thread(target=self.server_handler)
+        server_handler_thread.start()
+
+        if not self.event_queue:
+            user_handler_thread = threading.Thread(target=self.user_handler)
+            user_handler_thread.start()
+
+    def main_init(self) -> None:
+        secure_server_tcp_socket = self.connect_and_auth_server((self.server_hostname, PORT_TO_CONNECT))
         # основной сокет для работы с сервером
         server_tcp_socket, server_symmetric_key = self.get_server_secret_key(secure_server_tcp_socket)
+        self.server = Friend(public_address=self.server_hostname, sock=server_tcp_socket, client_id=SERVER_ID,
+                             symmetric_key=server_symmetric_key)
+        self.friendly_users[SERVER_ID] = self.server
+        self.private_tcp_address = server_tcp_socket.getsockname()
 
         # сокет для UDP подключений от других клиентов, в случае если не удается установить TCP соединение
         # self.udp_socket = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
@@ -103,24 +132,10 @@ class Client:
         self.private_tcp_address = server_tcp_socket.getsockname()
 
         if self.p2p_tcp_connection_possible:
-            self.max_queue = 5
+            self.max_listen_queue = 5
             self.p2p_tcp_listener = socket.socket(family=socket.AF_INET, type=socket.SOCK_STREAM)
             self.p2p_tcp_listener.bind(self.private_tcp_address)
-            self.p2p_tcp_listener.listen(self.max_queue)
-
-        self.friendly_users = dict()  # id: Friend
-        self.p2p_connected = set()  # id's of connected friends
-
-        self.server = Friend(public_address=server_hostname, sock=server_tcp_socket, client_id=SERVER_ID,
-                             symmetric_key=server_symmetric_key)
-        self.friendly_users[SERVER_ID] = self.server
-
-        self.id = USER_NOT_AUTHENTICATED  # не аутентифицирован
-        self.login = None
-        self.lock = threading.Lock()
-        self.thread_locals = threading.local()
-        self.connector = Peer2PeerConnector(self)
-        self.public_key = self.private_key = None
+            self.p2p_tcp_listener.listen(self.max_listen_queue)
 
         ClientUserDatabase(need_client_init=True)
         # ClientMessageDatabase(need_client_init=True)
@@ -130,14 +145,6 @@ class Client:
         friend_init_thread.start()
         key_init_thread.join()
         friend_init_thread.join()
-
-    def run(self) -> None:
-        server_handler_thread = threading.Thread(target=self.server_handler)
-        server_handler_thread.start()
-
-        if not self.event_queue:
-            user_handler_thread = threading.Thread(target=self.user_handler)
-            user_handler_thread.start()
 
     def start_post_authentication_init(self):
         """
