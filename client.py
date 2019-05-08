@@ -402,6 +402,7 @@ class Client:
         elif message_type == CLIENT_ADD_FRIEND_BY_LOGIN or message_type == CLIENT_ADD_FRIEND_BY_ID:
             self.ask_friend_login_to_add()
         elif message_type == CLIENT_LOG_OUT:
+
             self.log_out()
         elif message_type == CLIENT_CREATE_P2P_CONNECTION:
             user_id = int(get_input("Введите id пользователя\n"))
@@ -482,7 +483,6 @@ class Client:
     def check_login_and_password(self, login: str, password: str) -> bool:
         # TODO проверить чтоб логин/ пароль не содержали пробелов и т.д. и только после этого отсылать на сервер
         pass
-
     def log_in(self, login: str, password: str, auth_type: int) -> None:
         if self.id:
             return
@@ -506,6 +506,7 @@ class Client:
         else:
             self.event_queue.put((GUI_USER_LOG_OUT,))
 
+
     def log_out(self) -> None:
         message = Message(mes_type=COMMAND, sender_id=self.id, receiver_id=SERVER_ID)
         message.message = str(CLIENT_LOG_OUT)
@@ -515,6 +516,7 @@ class Client:
             print("Вы вышли из системы, войдите или зарегистрируйтесь для продолжения")
         else:
             self.event_queue.put((GUI_USER_LOG_OUT,))
+
 
     def create_p2p_connection(self, user_id: int, creator: bool = True) -> None:
         if user_id in self.p2p_connected or user_id == self.id or user_id == SERVER_ID:
@@ -629,6 +631,7 @@ class ReceivedMessageManager:
         elif command == SERVER_SYMMETRIC_KEY:
             self.on_symmetric_key(data)
         elif command == SERVER_ALL_MESSAGES_SENT:
+
             self.clear()
         else:
             pass

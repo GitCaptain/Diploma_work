@@ -4,6 +4,7 @@ from constants import *
 from queue import Queue, Empty
 from sys import exit
 
+
 MESSENGER_NAME = "deep low moan"
 
 AUTHENTICATION_HANDLERS = 0
@@ -11,6 +12,7 @@ MAIN_WINDOW_HANDLERS = 1
 
 HANDLER_REGISTER_BUTTON = 'register'
 HANDLER_ENTER_BUTTON = 'enter'
+
 HANDLER_GET_FRIENDS = 'get friends'
 HANDLER_ADD_FRIEND = 'add friend'
 HANDLER_LOG_OUT = 'log out'
@@ -43,7 +45,7 @@ class PixelSizedLabel(Label):
             self.img = PhotoImage()
         super().__init__(master, image=self.img, compound=CENTER, **kwargs)
 
-
+        
 class FrameWithScrolledListBox(Frame):
     """
     Список элементов со встроенной полосой прокрутки
@@ -130,7 +132,7 @@ class EntryWithTemplateString(Entry):
             self.insert_template_string()
 
 
-class LoginWindow(Frame):
+            class LoginWindow(Frame):
 
     def __init__(self, master=None, handlers=None, **kwargs):
 
@@ -146,6 +148,7 @@ class LoginWindow(Frame):
         self.login_var = StringVar()
         self.login_entry = EntryWithTemplateString(self.auth_window, width=entry_width,
                                                    **{EntryWithTemplateString.TEMPLATE_STRING: 'логин:'})
+
         self.login_entry.config(textvariable=self.login_var)
         self.login_entry.pack(side=TOP, expand=YES)
 
@@ -202,6 +205,7 @@ class MainWindow(Frame):
         self.chat_selected = None
         self.selected_friend = -1
         self.active_friend_id = None
+
         # ----------------------------- верхняя полоска settings
         settings_frame_height = 20
         self.settings_frame = Frame(self, height=settings_frame_height)
@@ -239,6 +243,7 @@ class MainWindow(Frame):
         friend_list_width = 40
         self.friend_list = FrameWithScrolledListBox(self.main_frame, scrollbarside=LEFT, listboxside=RIGHT,
                                                     width=friend_list_width)
+
         self.friend_list.pack(side=LEFT, fill=Y)
         # ----------------------------- Frame со списком друзей
 
@@ -267,6 +272,7 @@ class MainWindow(Frame):
 
         self.secret_p2p_chat_button = PixelSizedButton(self.chat_type_select_frame,
                                                        text=self.BUTTON_NAME_SECRET_P2P_CHAT)
+
         self.secret_p2p_chat_button.pack(side=LEFT, fill=Y)
         # ----------------------------- выбор чата
 
@@ -284,6 +290,7 @@ class MainWindow(Frame):
         self.message_entry = EntryWithTemplateString(self.message_frame, templatestring='Введите сообщение:',
                                                      textvariable=self.message_var,
                                                      **{EntryWithTemplateString.CLEAR_ON_RETURN: True})
+
         self.message_entry.pack(side=LEFT, fill=BOTH, expand=YES)
 
         self.send_button = PixelSizedButton(self.message_frame, text='отослать')
@@ -303,6 +310,7 @@ class MainWindow(Frame):
         self.friend_list.listbox.bind('<Button-1>', self.update_chosen_friend_and_show_chat)
         self.friend_list.listbox.bind('<Return>', self.update_chosen_friend_and_show_chat)
         self.friend_list.listbox.bind('<FocusIn>', self.update_chosen_friend_and_show_chat)
+
 
         self.chat_button.config(command=self.show_chat)
         self.secret_chat_button.config(command=self.show_secret_chat)
@@ -353,6 +361,7 @@ class MainWindow(Frame):
         login, uid = selected
         self.label_friend_name.config(text=f"чат с {login}")
         self.chat_button.config(text=self.BUTTON_NAME_CHAT)
+
         self.update_view(uid, False, False)
 
     def show_secret_chat(self):
@@ -579,3 +588,4 @@ class GUI:
 
 if __name__ == '__main__':
     pass
+

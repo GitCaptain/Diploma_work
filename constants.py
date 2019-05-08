@@ -50,6 +50,11 @@ GUI_USER_LOG_OUT = -5
 GUI_P2P_CONNECTION_DONE = -6
 GUI_P2P_CONNECTION_FAIL = -7
 
+# command for client and gui, they must not intersect
+FRIEND_ITEM = -1
+INIT_DONE = -2
+MESSAGE_ITEM = -3
+
 # Server response
 SERVER_WRONG_LOGIN = 1
 SERVER_WRONG_PASSWORD = 2
