@@ -158,7 +158,6 @@ class Server:
             key = friend_data[DB_COLUMN_NAME_USER_PUBLIC_KEY]
             beg, end = count_spaces_at_the_edges(key)
             message_to_user.message = get_bytes_string(f"{SERVER_FRIEND_DATA} {friend_data[DB_COLUMN_NAME_USER_ID]} ") + \
-
                                       friend_data[DB_COLUMN_NAME_USER_LOGIN] + get_bytes_string(f" {beg} {end} ") + key
         send_message_to_client(user, message_to_user, user.symmetric_key)
 

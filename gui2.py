@@ -8,6 +8,7 @@ MESSENGER_NAME = "deep low moan"
 
 AUTHENTICATION_HANDLERS = 0
 MAIN_WINDOW_HANDLERS = 1
+FRIEND_LIST_HANDLERS = 2
 
 HANDLER_REGISTER_BUTTON = 'register'
 HANDLER_ENTER_BUTTON = 'enter'
@@ -18,6 +19,11 @@ HANDLER_DELETE_USER = 'delete user'
 HANDLER_GET_MESSAGE = 'get message'
 HANDLER_SEND_MESSAGE = 'send message'
 HANDLER_P2P_CONNECTION = 'p2p'
+HANDLER_SECRET_KEY_EXCHANGE = 'secret'
+
+WINDOW_CHANGE_AUTHENTICATION_WINDOW = 'open auth'
+WINDOW_CHANGE_MAIN_WINDOW = 'open main'
+WINDOW_CHANGE_FRIEND_LIST_WINDOW = 'open friends'
 
 
 class PixelSizedButton(Button):
@@ -42,45 +48,6 @@ class PixelSizedLabel(Label):
         else:
             self.img = PhotoImage()
         super().__init__(master, image=self.img, compound=CENTER, **kwargs)
-
-
-class FrameWithScrolledListBox(Frame):
-    """
-    Список элементов со встроенной полосой прокрутки
-    """
-
-    SCROLLBAR_SIDE = 'scrollbarside'
-    LISTBOX_SIDE = 'listboxside'
-
-    def __init__(self, master=None, scrollbar=None, listbox=None, **kwargs):
-
-        if self.SCROLLBAR_SIDE in kwargs:
-            self.sbside = kwargs.pop(self.SCROLLBAR_SIDE)
-        else:
-            self.sbside = LEFT
-
-        if self.LISTBOX_SIDE in kwargs:
-            self.lbside = kwargs.pop(self.LISTBOX_SIDE)
-        else:
-            self.lbside = RIGHT
-
-        super().__init__(master, kwargs)
-
-        if not scrollbar:
-            self.scrollbar = Scrollbar(self)
-        else:
-            self.scrollbar = scrollbar
-
-        if not listbox:
-            self.listbox = Listbox(self)
-        else:
-            self.listbox = listbox
-
-        self.scrollbar.config(command=self.listbox.yview)
-        self.listbox.config(yscrollcommand=self.scrollbar.set)
-
-        self.scrollbar.pack(side=self.sbside, fill=Y, expand=NO)
-        self.listbox.pack(side=self.lbside, fill=BOTH, expand=YES)
 
 
 class EntryWithTemplateString(Entry):
@@ -184,95 +151,77 @@ class LoginWindow(Frame):
         self.handlers[HANDLER_REGISTER_BUTTON](login, password, auth_type)
 
 
-class MainWindow(Frame):
+class ChatWindow(Frame):
 
     SELECTED_CHAT = 1
     SELECTED_SECRET_CHAT = 2
     SELECTED_P2P_CHAT = 3
     SELECTED_SECRET_P2P_CHAT = 4
 
-    BUTTON_NAME_CHAT = "сообщения"
-    BUTTON_NAME_SECRET_CHAT = "секретные сообщения"
-    BUTTON_NAME_P2P_CHAT = "p2p сообщения"
-    BUTTON_NAME_SECRET_P2P_CHAT = "секретные p2p сообщения"
+    BUTTON_NAME_CHAT = "чат"
+    BUTTON_NAME_SECRET_CHAT = "секретный чат"
+    BUTTON_NAME_P2P_CHAT = "p2p чат"
+    BUTTON_NAME_SECRET_P2P_CHAT = "секретный p2p чат"
 
-    def __init__(self, master=None, handlers=None, **kwargs):
+    def __init__(self, master, handlers, selected_id, selected_login, event_queue, **kwargs):
         super().__init__(master, kwargs)
         self.handlers = handlers
-        self.master = master
         self.chat_selected = None
-        self.selected_friend = -1
-        # ----------------------------- верхняя полоска settings
+        self.selected_friend_id = selected_id
+        self.selected_friend_login = selected_login
+        self.event_queue = event_queue
+
+        # ----------------------------- верхняя полоска с информацией
         settings_frame_height = 20
         self.settings_frame = Frame(self, height=settings_frame_height)
         self.settings_frame.pack(side=TOP, fill=X, anchor=N)
 
-        settings_button_width = 100
-        settings_entry_width = 20
-        padx = 5
+        self.back_button = Button(self.settings_frame, text="назад")
+        self.back_button.pack(side=LEFT, fill=Y)
 
-        self.filler = PixelSizedLabel(self.settings_frame, width=14)
-        self.filler.pack(side=LEFT, fill=Y)
+        self.chat_info_label = Label(self.settings_frame, text=f"чат с {self.selected_friend_login}")
+        self.chat_info_label.pack(side=LEFT, fill=Y)
 
-        self.add_var = StringVar()
-        self.add_entry = EntryWithTemplateString(self.settings_frame, textvariable=self.add_var,
-                                                 width=settings_entry_width,
-                                                 templatestring='логин: ')
-        self.add_entry.pack(side=LEFT, fill=Y)
+        self.start_p2p_button = Button(self.settings_frame, text="Установить p2p соединение")
+        self.start_p2p_button.pack(side=RIGHT, fill=Y)
 
-        self.add_button = PixelSizedButton(self.settings_frame, width=settings_button_width, text='Добавить друга')
-        self.add_button.pack(side=LEFT, fill=Y, padx=padx)
+        self.exchange_keys_button = Button(self.settings_frame, text="установить секретный ключ")
+        self.exchange_keys_button.pack(side=RIGHT, fill=Y)
+        # ----------------------------- верхняя полоска с информацией
 
-        self.exit_button = PixelSizedButton(self.settings_frame, width=settings_button_width, text='Выйти из аккаунта')
-        self.exit_button.pack(side=RIGHT, fill=Y)
+        # ----------------------------- кнопки выбора чата
+        self.chat_button_frame = Frame(self)
+        self.chat_button_frame.pack(side=TOP, fill=BOTH)
 
-        self.delete_button = PixelSizedButton(self.settings_frame, width=settings_button_width, text='Удалить аккаунт')
-        self.delete_button.pack(side=RIGHT, fill=Y, padx=padx)
-        # ----------------------------- верхняя полоска settings
-
-        # ----------------------------- основной frame
-        self.main_frame = Frame(self)
-        self.main_frame.pack(side=TOP, fill=BOTH, expand=YES, anchor=N)
-        # ----------------------------- основной frame
-
-        # ----------------------------- Frame со списком друзей
-        friend_list_width = 40
-        self.friend_list = FrameWithScrolledListBox(self.main_frame, scrollbarside=LEFT, listboxside=RIGHT,
-                                                    width=friend_list_width)
-        self.friend_list.pack(side=LEFT, fill=Y)
-        # ----------------------------- Frame со списком друзей
-
-        # ----------------------------- Frame все связанное с чатом
-        self.chat_frame = Frame(self.main_frame)
-        self.chat_frame.pack(side=RIGHT, fill=BOTH, expand=YES)
-        # ----------------------------- Frame все связанное с чатом
-
-        # ----------------------------- метка чата с пользователем
-        self.label_friend_name = Label(self.chat_frame, text="чат с: ", anchor=W)
-        self.label_friend_name.pack(side=TOP, fill=X)
-        # ----------------------------- метка чата с пользователем
-
-        # ----------------------------- выбор чата
-        self.chat_type_select_frame = Frame(self.chat_frame)
-        self.chat_type_select_frame.pack(side=TOP, fill=X)
-
-        self.chat_button = PixelSizedButton(self.chat_type_select_frame, text=self.BUTTON_NAME_CHAT)
+        self.chat_button = Button(self.chat_button_frame, text=self.BUTTON_NAME_CHAT)
         self.chat_button.pack(side=LEFT, fill=Y)
 
-        self.secret_chat_button = PixelSizedButton(self.chat_type_select_frame, text=self.BUTTON_NAME_SECRET_CHAT)
+        self.secret_chat_button = Button(self.chat_button_frame, text=self.BUTTON_NAME_SECRET_CHAT)
         self.secret_chat_button.pack(side=LEFT, fill=Y)
 
-        self.p2p_chat_button = PixelSizedButton(self.chat_type_select_frame, text=self.BUTTON_NAME_P2P_CHAT)
+        self.p2p_chat_button = Button(self.chat_button_frame, text=self.BUTTON_NAME_P2P_CHAT)
         self.p2p_chat_button.pack(side=LEFT, fill=Y)
 
-        self.secret_p2p_chat_button = PixelSizedButton(self.chat_type_select_frame,
-                                                       text=self.BUTTON_NAME_SECRET_P2P_CHAT)
+        self.secret_p2p_chat_button = Button(self.chat_button_frame, text=self.BUTTON_NAME_SECRET_P2P_CHAT)
         self.secret_p2p_chat_button.pack(side=LEFT, fill=Y)
-        # ----------------------------- выбор чата
+        # ----------------------------- кнопки выбора чата
+
+        # ----------------------------- Frame все связанное с чатом
+        self.chat_frame = Frame(self)
+        self.chat_frame.pack(side=RIGHT, fill=BOTH, expand=YES)
 
         # ----------------------------- окно чата
-        self.dialog_frame = FrameWithScrolledListBox(self.chat_frame, scrollbarside=RIGHT, listboxside=LEFT)
+        self.dialog_frame = Frame(self.chat_frame)
         self.dialog_frame.pack(side=TOP, fill=BOTH, expand=YES)
+
+        self.dialog_frame_scrollbar = Scrollbar(self.dialog_frame)
+        self.dialog_frame_scrollbar.pack(side=RIGHT, fill=Y)
+
+        self.dialog_frame_listbox = Listbox(self.dialog_frame)
+        self.dialog_frame_listbox.pack(side=LEFT, fill=BOTH, expand=YES)
+
+        self.dialog_frame_listbox.config(yscrollcommand=self.dialog_frame_scrollbar.set)
+        self.dialog_frame_scrollbar.config(command=self.dialog_frame_listbox.yview)
         # ----------------------------- окно чата
 
         # ----------------------------- ввод сообщения
@@ -290,19 +239,16 @@ class MainWindow(Frame):
         self.send_button.pack(side=RIGHT)
         # ----------------------------- ввод сообщения
 
+        # ----------------------------- Frame все связанное с чатом
+
         self.set_handlers()
+        self.update_view(self.selected_friend_id, False, False)
 
     def set_handlers(self):
-        self.add_entry.bind('<Return>', self.add_friend)
-        self.add_button.config(command=self.add_friend)
 
-        self.delete_button.config(command=self.delete_user)
-        self.exit_button.config(command=self.log_out)
-
-        self.friend_list.listbox.bind('<Double-Button-1>', self.update_chosen_friend_and_show_chat)
-        self.friend_list.listbox.bind('<Button-1>', self.update_chosen_friend_and_show_chat)
-        self.friend_list.listbox.bind('<Return>', self.update_chosen_friend_and_show_chat)
-        self.friend_list.listbox.bind('<FocusIn>', self.update_chosen_friend_and_show_chat)
+        self.back_button.config(command=self.go_back)
+        self.start_p2p_button.config(command=self.start_p2p)
+        self.exchange_keys_button.config(command=self.exchange_keys)
 
         self.chat_button.config(command=self.show_chat)
         self.secret_chat_button.config(command=self.show_secret_chat)
@@ -312,20 +258,20 @@ class MainWindow(Frame):
         self.message_entry.bind('<Return>', self.send_message)
         self.send_button.config(command=self.send_message)
 
-    def update_chosen_friend_and_show_chat(self, *args):
+    def start_p2p(self):
+        self.handlers[HANDLER_P2P_CONNECTION](self.selected_friend_id, True)
 
-        #self.selected_friend = self.friend_list.listbox.curselection()[0]
-        self.selected_friend = self.friend_list.listbox.curselection()
-        if self.selected_friend:
-            self.selected_friend = self.selected_friend[0]
-        self.show_chat()
+    def exchange_keys(self):
+        self.handlers[HANDLER_SECRET_KEY_EXCHANGE](self.selected_friend_id)
+
+    def go_back(self):
+        self.event_queue.put((WINDOW_CHANGE_FRIEND_LIST_WINDOW, ))
 
     def send_message(self, *args):
-        selected = self.get_friend(self.selected_friend)
         message = self.message_var.get()
-        if not message or selected[1] < 0 or not self.chat_selected or self.message_entry.template_stated:
+        if not message or self.message_entry.template_stated:
             return
-        login, uid = selected
+
         secret, p2p = False, False
         if self.chat_selected == self.SELECTED_SECRET_CHAT:
             secret = True
@@ -334,86 +280,114 @@ class MainWindow(Frame):
         elif self.chat_selected == self.SELECTED_SECRET_P2P_CHAT:
             secret = True
             p2p = True
+
         self.message_entry.on_enter_pressed()
         self.insert_message(message, True)
-        self.handlers[HANDLER_SEND_MESSAGE](message, uid, p2p, secret)
-
-    def get_friend(self, index):
-        friend = self.friend_list.listbox.get(index).split(':')
-        if friend:
-            login, uid = friend
-            uid = int(uid)
-            return login, uid
-        return '', -1
-
-    def get_selected_friend(self):
-        return self.get_friend(self.selected_friend)
+        self.handlers[HANDLER_SEND_MESSAGE](message, self.selected_friend_id, p2p, secret)
 
     def show_chat(self):
-        selected = self.get_selected_friend()
-        if selected[1] < 0:
-            return
         self.chat_selected = self.SELECTED_CHAT
-        login, uid = selected
-        self.label_friend_name.config(text=f"чат с {login}")
+        self.chat_info_label.config(text=f"{self.BUTTON_NAME_CHAT} с {self.selected_friend_login}")
         self.chat_button.config(text=self.BUTTON_NAME_CHAT)
-        self.update_view(uid, False, False)
+        self.update_view(self.selected_friend_id, False, False)
 
     def show_secret_chat(self):
-        selected = self.get_selected_friend()
-        if selected[1] < 0:
-            return
         self.chat_selected = self.SELECTED_SECRET_CHAT
-        login, uid = selected
-        self.label_friend_name.config(text=f"секретный чат с {login}")
+        self.chat_info_label.config(text=f"{self.BUTTON_NAME_SECRET_CHAT} с {self.selected_friend_login}")
         self.secret_chat_button.config(text=self.BUTTON_NAME_SECRET_CHAT)
-        self.update_view(uid, True, False)
+        self.update_view(self.selected_friend_id, True, False)
 
     def show_p2p_chat(self):
-        selected = self.get_selected_friend()
-        if selected[1] < 0:
-            return
         self.chat_selected = self.SELECTED_P2P_CHAT
-        login, uid = selected
-        self.label_friend_name.config(text=f"p2p чат с {login}")
+        self.chat_info_label.config(text=f"{self.BUTTON_NAME_P2P_CHAT} с {self.selected_friend_login}")
         self.p2p_chat_button.config(text=self.BUTTON_NAME_P2P_CHAT)
-        self.update_view(uid, False, True)
+        self.update_view(self.selected_friend_id, False, True)
 
     def show_secret_p2p_chat(self):
-        selected = self.get_selected_friend()
-        if selected[1] < 0:
-            return
-        login, uid = selected
         self.chat_selected = self.SELECTED_SECRET_P2P_CHAT
-        self.label_friend_name.config(text=f"секретный p2p чат с {login}")
+        self.chat_info_label.config(text=f"{self.BUTTON_NAME_SECRET_P2P_CHAT} с {self.selected_friend_login}")
         self.secret_p2p_chat_button.config(text=self.BUTTON_NAME_SECRET_P2P_CHAT)
-        self.update_view(uid, True, True)
+        self.update_view(self.selected_friend_id, True, True)
 
     def insert_message(self, text, is_sender):
         if is_sender:
             text = f"Отправлено: {text}"
         else:
             text = f"Принято: {text}"
-        self.dialog_frame.listbox.insert(END, text)
-        self.dialog_frame.listbox.see(END)
+        self.dialog_frame_listbox.insert(END, text)
+        self.dialog_frame_listbox.see(END)
 
     def update_view(self, uid, secret, p2p):
-        self.selected_friend = uid
-        self.dialog_frame.listbox.delete(0, END)
+        # TODO когда сообщения приходят от другого клиента чат сменяется без обновления метки, исправить
+        self.dialog_frame_listbox.delete(0, END)
         for message in self.handlers[HANDLER_GET_MESSAGE](uid, secret, p2p):
             self.insert_message(message.message, message.is_sender)
-        self.dialog_frame.listbox.see(END)
+        self.dialog_frame_listbox.see(END)
 
-    def log_out(self):
-        self.handlers[HANDLER_LOG_OUT]()
 
-    def delete_user(self):
-        self.handlers[HANDLER_DELETE_USER]()
+class FriendListWindow(Frame):
 
-    def add_friend(self, *args):
-        login = self.add_var.get()
-        if login and not self.add_entry.template_stated:
-            self.handlers[HANDLER_ADD_FRIEND](login)
+    def __init__(self, master, handlers, event_queue, login, **kwargs):
+
+        super().__init__(master, kwargs)
+        self.handlers = handlers
+        self.event_queue = event_queue
+        self.client_login = login
+        # ----------------------------- поиск и кнопка добавить
+        self.search_frame = Frame(self)
+        self.search_frame.pack(side=TOP, fill=X)
+
+        self.add_var = StringVar()
+        self.add_entry = EntryWithTemplateString(self.search_frame, textvariable=self.add_var,
+                                                 templatestring='логин: ')
+        self.add_entry.pack(side=TOP, fill=X)
+
+        self.add_button = PixelSizedButton(self.search_frame, text='Добавить друга')
+        self.add_button.pack(side=TOP, fill=X)
+        # ----------------------------- поиск и кнопка добавить
+
+        # ----------------------------- Список друзей
+        self.friend_list_frame = Frame(self)
+        self.friend_list_frame.pack(side=TOP, fill=BOTH, expand=YES)
+
+        self.friend_list_scrollbar = Scrollbar(self.friend_list_frame)
+        self.friend_list_scrollbar.pack(side=RIGHT, fill=Y)
+
+        self.friend_list_listbox = Listbox(self.friend_list_frame)
+        self.friend_list_listbox.pack(side=LEFT, fill=BOTH, expand=YES)
+
+        self.friend_list_listbox.config(yscrollcommand=self.friend_list_scrollbar.set)
+        self.friend_list_scrollbar.config(command=self.friend_list_listbox.yview)
+        # ----------------------------- Список друзей
+
+        # ----------------------------- нижняя полоска инфо
+        self.settings_frame = Frame(self)
+        self.settings_frame.pack(side=BOTTOM, fill=X)
+
+        self.login_label = Label(self.settings_frame, text=f"вход выполнен: {self.client_login}")
+        self.login_label.pack(side=TOP)
+
+        self.exit_button = PixelSizedButton(self.settings_frame, text='Выйти из аккаунта')
+        self.exit_button.pack(side=TOP, fill=BOTH)
+
+        self.delete_button = PixelSizedButton(self.settings_frame, text='Удалить аккаунт')
+        self.delete_button.pack(side=TOP, fill=BOTH)
+        # ----------------------------- нижняя полоска инфо
+
+        self.set_handlers()
+
+    def set_handlers(self):
+        self.delete_button.config(command=self.handlers[HANDLER_DELETE_USER])
+        self.exit_button.config(command=self.handlers[HANDLER_LOG_OUT])
+
+        self.add_entry.bind('<Return>', self.add_friend)
+        self.add_button.config(command=self.add_friend)
+
+        self.delete_button.config(command=self.delete_user)
+        self.exit_button.config(command=self.log_out)
+
+        self.friend_list_listbox.bind('<Double-Button-1>', self.show_chat_with_friend)
+        self.friend_list_listbox.bind('<Return>', self.show_chat_with_friend)
 
     def update_friend_list(self):
         friend_generator = self.handlers[HANDLER_GET_FRIENDS]()
@@ -423,7 +397,27 @@ class MainWindow(Frame):
     def add_item_into_friend_list(self, friend_item):
         flogin, fid = friend_item
         if fid != SERVER_ID:
-            self.friend_list.listbox.insert(0, f"{flogin}: {fid}")
+            self.friend_list_listbox.insert(0, f"{flogin}: {fid}")
+
+    def add_friend(self, *args):
+        login = self.add_var.get()
+        if login and not self.add_entry.template_stated:
+            self.handlers[HANDLER_ADD_FRIEND](login)
+            self.add_entry.insert_template_string()
+
+    def log_out(self):
+        self.handlers[HANDLER_LOG_OUT]()
+
+    def delete_user(self):
+        self.handlers[HANDLER_DELETE_USER]()
+
+    def show_chat_with_friend(self, *args):
+        selected = self.friend_list_listbox.curselection()
+        if selected:
+            selected = self.friend_list_listbox.get(selected[0])
+            login, uid = selected.split(':')
+            uid = int(uid)
+            self.event_queue.put((WINDOW_CHANGE_MAIN_WINDOW, login, uid))
 
 
 class GUI:
@@ -435,10 +429,12 @@ class GUI:
         self.check_interval_in_milliseconds = 10
 
         self.client_authenticated = False
+        self.client_login = ''
         self.client_init_done = False
         self.even_queue = event_queue
         self.login_window = None
-        self.main_window = None
+        self.chat_window = None
+        self.friend_list_window = None
         # TODO вместе с фронтендом выключать бекенд
         # self.root.protocol("WM_DELETE_WINDOW", self.on_close)
 
@@ -451,19 +447,37 @@ class GUI:
         self.login_window = LoginWindow(self.root, handlers=self.handlers[AUTHENTICATION_HANDLERS])
         self.login_window.pack(fill=BOTH, expand=YES)
 
-    def run_main_window(self):
+    def run_main_window(self, flogin, fid):
 
         self.clear_root()
         self.root.geometry("600x400")
         self.root.resizable(width=True, height=True)
+        self.root.title(f"{self.client_login}'s {MESSENGER_NAME}")
+        self.chat_window = ChatWindow(master=self.root,
+                                      handlers=self.handlers[MAIN_WINDOW_HANDLERS],
+                                      event_queue=self.even_queue,
+                                      selected_id=fid,
+                                      selected_login=flogin)
 
-        self.main_window = MainWindow(self.root, handlers=self.handlers[MAIN_WINDOW_HANDLERS])
-        self.main_window.pack(fill=BOTH, expand=YES)
-        self.main_window.update_friend_list()
+        self.chat_window.pack(fill=BOTH, expand=YES)
 
-    def on_success_auth(self):
+    def run_friend_list_window(self):
+        self.clear_root()
+        self.root.geometry("250x400")
+        self.root.resizable(width=False, height=True)
+
+        self.friend_list_window = FriendListWindow(master=self.root,
+                                                   handlers=self.handlers[FRIEND_LIST_HANDLERS],
+                                                   event_queue=self.even_queue,
+                                                   login=self.client_login)
+        self.friend_list_window.update_friend_list()
+        self.friend_list_window.pack(fill=BOTH, expand=YES)
+
+    def on_success_auth(self, data):
+        # data = ['login']
         self.client_authenticated = True
-        self.run_main_window()
+        self.client_login = data[0]
+        self.run_friend_list_window()
 
     def on_fail_auth(self, fail_type):
         if fail_type == SERVER_WRONG_LOGIN:
@@ -484,8 +498,10 @@ class GUI:
     def clear_root(self):
         """
         Уничтожает все элементы находящиеся в self.root (и их дочерние элементы)
+        и восстанавливает настройки по умолчанию
         :return:
         """
+        self.root.title(MESSENGER_NAME)
         for e in self.root.slaves():
             e.destroy()
 
@@ -501,11 +517,11 @@ class GUI:
     def event_handler(self, event):
         event, *data = event
         if event == SERVER_AUTHENTICATION_SUCCESS:
-            self.run_main_window()
+            self.on_success_auth(data)
         elif event == SERVER_WRONG_LOGIN or event == SERVER_WRONG_PASSWORD:
             self.on_fail_auth(event)
         elif event == CLIENT_LOG_OUT or event == CLIENT_DELETE_USER:
-            self.run_authentication_window()
+            self.on_authentication_window()
         elif event == GUI_FRIEND_ITEM:
             self.update_friend_list(data)
         elif event == GUI_INIT_DONE:
@@ -526,6 +542,27 @@ class GUI:
             self.on_p2p_connection_fail()
         elif event == GUI_P2P_CONNECTION_DONE:
             self.on_p2p_connection_done()
+        elif event == GUI_SECRET_KEY_NOT_STATED:
+            self.on_secret_key_not_stated()
+        elif event == WINDOW_CHANGE_MAIN_WINDOW:
+            self.on_main_window(data)
+        elif event == WINDOW_CHANGE_AUTHENTICATION_WINDOW:
+            self.on_authentication_window()
+        elif event == WINDOW_CHANGE_FRIEND_LIST_WINDOW:
+            self.on_friend_list_window()
+
+    def on_secret_key_not_stated(self):
+        showerror('Ошибка ключа', 'Невозможно начать секретный чат.\nСперва необходимо установить секретный ключ.')
+
+    def on_friend_list_window(self):
+        self.run_friend_list_window()
+
+    def on_authentication_window(self):
+        self.run_authentication_window()
+
+    def on_main_window(self, data):
+        # data = ['login', uid]
+        self.run_main_window(data[0], data[1])
 
     def on_p2p_connection_done(self):
         showinfo('p2p соединение', 'p2p соединение успешно установлено')
@@ -548,22 +585,17 @@ class GUI:
         text = data[1]
         secret = data[2]
         p2p = data[3]
-        if self.main_window.get_selected_friend[1] == uid:
+        if self.chat_window.selected_friend_id == uid:
             # открыт чат с нужным пользователем
             # TODO: проверять, какой чат обновляем, например если пришло секретное сообщение, а чат открыт обычный, то
-            # TODO: обновлять его не нужно
-            self.main_window.update_view(uid, secret, p2p)
+            # TODO: обновлять его не нужно, а нужно поставить * на нужной кнопке
+            self.chat_window.update_view(uid, secret, p2p)
         else:
             # TODO Поставить * у нужного друга в списке
             pass
 
     def on_connection_not_established(self):
-        if askyesno('Соединение не установлено',
-                    'Для начала общения p2p нужно установить соединение.\nУстановить соединение?'):
-            login, uid = self.main_window.get_selected_friend()
-            if uid < 0:
-                return
-            self.handlers[MAIN_WINDOW_HANDLERS][HANDLER_P2P_CONNECTION](uid, True)
+        showerror('Ошибка p2p соединения', 'Невозможно начать p2p чат.\nСперва необходимо установить p2p соединение.')
 
     def on_client_init_done(self):
         self.client_init_done = True
@@ -573,7 +605,7 @@ class GUI:
         flogin, fid = data
         if not self.client_authenticated:
             return
-        self.main_window.friend_list.insert(f"{flogin}: {fid}")
+        self.friend_list_window.friend_list_listbox.insert(0, f"{flogin}: {fid}")
 
     def on_close(self):
         if askokcancel("Выйти", "Вы действительно хотите выйти?"):
