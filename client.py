@@ -97,6 +97,7 @@ class Client:
         self.thread_locals = threading.local()
         self.connector = Peer2PeerConnector(self)
         self.public_key = self.private_key = None
+        self.time_to_stop = False
 
     def run(self) -> None:
         self.main_init()
@@ -107,6 +108,41 @@ class Client:
             user_handler_thread = threading.Thread(target=self.user_handler)
             user_handler_thread.start()
 
+    # методы для установки соединения с сервером
+    def connect_and_auth_server(self, server_address: '(str, int)') -> socket:
+        """
+        Создаем ssl соединение с сервером, тем самым аутентифицируя его
+        :param server_address:
+        :return: ssl socket, который будет использоваться для безопасного установления общего симметричного ключа
+        """
+        secure_context = ssl.create_default_context(cafile='secure/CA.pem')
+        # обязательно вернуть ТРУ, когда будет сервер нейм, либо разобраться с альтнеймами в серитфикатах
+        secure_context.check_hostname = False
+        server_socket = socket.socket(family=socket.AF_INET, type=socket.SOCK_STREAM)
+        secure_server_socket = secure_context.wrap_socket(server_socket)
+        while not connect_to_address(secure_server_socket, server_address):
+            if not self.event_queue:
+                print("подключение не удалось")
+            time.sleep(3)  # Ждем, несколько секунд, прежде чем подключиться снова
+        if not self.event_queue:
+            print("Подключено")
+        return secure_server_socket
+
+    @staticmethod
+    def get_server_secret_key(secure_socket: socket) -> '(socket, bytes)':
+        """
+        Получаем секретный ключ, с помощью которого будем общаться с сервером в дальнейшем,
+        данное сообщение не нужно проверять на подлинность и расшифровывать, т.к. этим занимается ssl
+        :param secure_socket: ssl socket из которого получим секретный ключ
+        :return: обычный сокет, через который будем общаться с сервером, используя полученный секретный ключ
+        и сам секретный ключ
+        """
+        # тут ключ по частям собирать не нужно, т.к. я передаю только его и нигде не делаю split
+        symmetric_key = get_message_from_client(User(sock=secure_socket)).message
+        return secure_socket.unwrap(), symmetric_key
+    # -----------------------------
+
+    # методы для инициализации клиента
     def main_init(self) -> None:
         secure_server_tcp_socket = self.connect_and_auth_server((self.server_hostname, PORT_TO_CONNECT))
         # основной сокет для работы с сервером
@@ -145,15 +181,6 @@ class Client:
         friend_init_thread.start()
         key_init_thread.join()
         friend_init_thread.join()
-
-    def start_post_authentication_init(self):
-        """
-        Подгружаем все необходимое, что нельзя было подгрузить до авторизации
-        :return:
-        """
-        self.init_messages()
-        if self.event_queue:
-            self.event_queue.put((GUI_INIT_DONE,))
 
     def init_friends(self) -> None:
         """
@@ -196,6 +223,15 @@ class Client:
             with open(secure + 'private.pem', 'rb') as priv, open(secure + 'public.pem', 'rb') as publ:
                 self.private_key = RSA.import_key(priv.read())
                 self.public_key = RSA.import_key(publ.read())
+
+    def start_post_authentication_init(self):
+        """
+        Подгружаем все необходимое, что нельзя было подгрузить до авторизации
+        :return:
+        """
+        self.init_messages()
+        if self.event_queue:
+            self.event_queue.put((GUI_INIT_DONE,))
 
     def init_messages(self) -> None:
         """
@@ -255,75 +291,60 @@ class Client:
             mes_list = self.friendly_users[friend_id].p2p_chat
         for message in message_generator:
             mes_list.append(message_item(not message[DB_COLUMN_NAME_MESSAGE_RECEIVED], message[DB_COLUMN_NAME_MESSAGE]))
+    # -----------------------------
 
-    def connect_and_auth_server(self, server_address: '(str, int)') -> socket:
-        """
-        Создаем ssl соединение с сервером, тем самым аутентифицируя его
-        :param server_address:
-        :return: ssl socket, который будет использоваться для безопасного установления общего симметричного ключа
-        """
-        secure_context = ssl.create_default_context(cafile='secure/CA.pem')
-        # обязательно вернуть ТРУ, когда будет сервер нейм, либо разобраться с альтнеймами в серитфикатах
-        secure_context.check_hostname = False
-        server_socket = socket.socket(family=socket.AF_INET, type=socket.SOCK_STREAM)
-        secure_server_socket = secure_context.wrap_socket(server_socket)
-        while not connect_to_address(secure_server_socket, server_address):
-            if not self.event_queue:
-                print("подключение не удалось")
-            time.sleep(3)  # Ждем, несколько секунд, прежде чем подключиться снова
-        if not self.event_queue:
-            print("Подключено")
-        return secure_server_socket
-
-    @staticmethod
-    def get_server_secret_key(secure_socket: socket) -> '(socket, bytes)':
-        """
-        Получаем секретный ключ, с помощью которого будем общаться с сервером в дальнейшем,
-        данное сообщение не нужно проверять на подлинность и расшифровывать, т.к. этим занимается ssl
-        :param secure_socket: ssl socket из которого получим секретный ключ
-        :return: обычный сокет, через который будем общаться с сервером, используя полученный секретный ключ
-        и сам секретный ключ
-        """
-        # тут ключ по частям собирать не нужно, т.к. я передаю только его и нигде не делаю split
-        symmetric_key = get_message_from_client(User(sock=secure_socket)).message
-        return secure_socket.unwrap(), symmetric_key
-
-    def server_handler(self, target: Friend = None) -> None:
-        if not target:
-            target = self.server
-        # для сохранения получаемых p2p сообщений
+    # методы для взаимодействия с пользователем в консольном режиме
+    def user_handler(self) -> None:
+        # для сохранения отправляемых p2p сообщений
         self.thread_locals.message_database = ClientMessageDatabase()
-        self.thread_locals.users_database = ClientUserDatabase()
-        self.thread_locals.message_manager = ReceivedMessageManager(self)
-        p2p = target != self.server
-        try:
-            while True:
-                message = get_message_from_client(target)
-                if not message:  # Что-то пошло не так и сервер отключился
-                    break
-                self.thread_locals.message_manager.handle(message, p2p)
+        print("Список команд для сервера:\n",
+              CLIENT_REGISTER_USER, " - Регистрация {login, password}\n",
+              CLIENT_LOG_IN, " - Вход {login, password}\n",
+              CLIENT_DELETE_USER, " - Удалить аккаунт\n",
+              CLIENT_CREATE_P2P_CONNECTION, " - Создать p2p соединение\n",
+              CLIENT_ADD_FRIEND_BY_LOGIN, " - добавить друга по логину\n",
+              CLIENT_ADD_FRIEND_BY_ID, " - добавить друга по id\n",
+              CLIENT_LOG_OUT, " - Выход\n",
+              sep="")
+        while True:
+            user_input = get_input("Введите тип команды:\n"
+                                   "0 - команда серверу,\n"
+                                   "1 - человеку,\n"
+                                   "2 - человеку напрямую\n"
+                                   "3 - шифр человеку\n"
+                                   "4 - шифр напрямую\n")
+            if not user_input or not user_input.isdigit():
+                continue
+            user_input = int(user_input)
+            if user_input == 0:
+                self.get_user_command()
+            elif user_input == 1:
+                self.ask_user_message()
+            elif user_input == 2:
+                self.ask_user_message(p2p=True)
+            elif user_input == 3:
+                self.ask_user_message(secret=True)
+            elif user_input == 4:
+                self.ask_user_message(p2p=True, secret=True)
 
-        except Exception as e:
-            print("Exception: {}".format(e.args))
-            print(traceback.format_exc())
-            print("id:", target.id)
-        finally:
+    def get_user_command(self) -> None:
+        user_input = get_input("Введите тип команды\n")
+        if not user_input:
+            return
+        message_type = int(user_input)
+        if message_type == CLIENT_REGISTER_USER or message_type == CLIENT_LOG_IN:
+            self.ask_registration_data(message_type)
+        elif message_type == CLIENT_DELETE_USER:
+            self.delete_account()
+        elif message_type == CLIENT_ADD_FRIEND_BY_LOGIN or message_type == CLIENT_ADD_FRIEND_BY_ID:
+            self.ask_friend_login_to_add()
+        elif message_type == CLIENT_LOG_OUT:
+            self.log_out()
+        elif message_type == CLIENT_CREATE_P2P_CONNECTION:
+            user_id = int(get_input("Введите id пользователя\n"))
+            self.create_p2p_connection(user_id)
+        else:
             pass
-
-    def get_message_history(self, friend_id: int, secret: bool, p2p: bool) -> message_item:
-        friend = self.friendly_users[friend_id]
-
-        if not secret and not p2p:
-            message_history = friend.chat
-        elif secret and not p2p:
-            message_history = friend.secret_chat
-        elif not secret and p2p:
-            message_history = friend.p2p_chat
-        elif secret and p2p:
-            message_history = friend.secret_p2p_chat
-
-        for mes_item in message_history:
-            yield mes_item
 
     def print_message_history(self, friend_id: int, secret: bool, p2p: bool):
 
@@ -356,6 +377,120 @@ class Client:
         message_text = get_input("Введите сообщение:\n")
 
         self.send_message(message_text, receiver_id, p2p, secret)
+
+    def ask_registration_data(self, auth_type: int):
+        if self.id:
+            print("Вы уже вошли")
+            return
+        login = get_input("Введите логин\n")
+        password = get_input("Введите пароль\n")
+        self.log_in(login, password, auth_type)
+
+    def ask_friend_login_to_add(self):
+        friend_login = get_input("Введите логин\n")
+        if friend_login:
+            self.add_friend(friend_login=friend_login)
+    # -----------------------------
+
+    # методы - обработчики
+    def server_handler(self, target: Friend = None) -> None:
+        if not target:
+            target = self.server
+        # для сохранения получаемых p2p сообщений
+        self.thread_locals.message_database = ClientMessageDatabase()
+        self.thread_locals.users_database = ClientUserDatabase()
+        self.thread_locals.message_manager = ReceivedMessageManager(self)
+        p2p = target != self.server
+        try:
+            while True:
+                message = get_message_from_client(target)
+                if not message:  # Что-то пошло не так и сервер отключился
+                    break
+                self.thread_locals.message_manager.handle(message, p2p)
+
+        except Exception as e:
+            print("Exception: {}".format(e.args))
+            print(traceback.format_exc())
+            print("id:", target.id)
+        finally:
+            pass
+
+    def log_in(self, login: str, password: str, auth_type: int) -> None:
+        if self.id:
+            return
+        if not self.check_login_and_password(login, password):
+            if self.event_queue:
+                self.event_queue.put((GUI_BAD_PASSWORD_OR_LOGIN, ))
+            else:
+                print('логин и пароль должны состоять из строчных латинских букв, цифр, '
+                      'символов подчеркивания и начинаться с буквы')
+            return
+        message = Message(mes_type=BYTES_COMMAND, sender_id=self.id, receiver_id=SERVER_ID, secret=True)
+        self.login = login
+        message.message = get_bytes_string(f"{auth_type} {login} {password}")
+        if auth_type == CLIENT_REGISTER_USER:
+            public_key_bytes = self.public_key.export_key()
+            beg, end = count_spaces_at_the_edges(public_key_bytes)
+            message.message += b' ' + get_bytes_string(f"{beg}") + b' ' + get_bytes_string(f"{end}") + b' ' \
+                               + public_key_bytes
+        send_message_to_client(self.server, message, self.server.symmetric_key)
+
+    def check_login_and_password(self, login: str, password: str) -> bool:
+
+        def check_str(string: str) -> bool:
+            if not string or not string.islower() or not string[0].isalpha():
+                return False
+            english_alph = 'abcdefghijklmnopqrstuvwxyz'
+            for c in string:
+                if c not in english_alph and not c.isdigit() and c != '_':
+                    return False
+            return True
+
+        return check_str(login) and check_str(password)
+
+    def delete_account(self) -> None:
+        message = Message(mes_type=COMMAND, sender_id=self.id, receiver_id=SERVER_ID)
+        message.message = str(CLIENT_DELETE_USER)
+        send_message_to_client(self.server, message, self.server.symmetric_key)
+        self.id = 0
+        if not self.event_queue:
+            print("Пользователь удален")
+        else:
+            self.event_queue.put((GUI_USER_LOG_OUT,))
+
+    def log_out(self) -> None:
+        message = Message(mes_type=COMMAND, sender_id=self.id, receiver_id=SERVER_ID)
+        message.message = str(CLIENT_LOG_OUT)
+        send_message_to_client(self.server, message, self.server.symmetric_key)
+        self.id = 0
+        if not self.event_queue:
+            print("Вы вышли из системы, войдите или зарегистрируйтесь для продолжения")
+        else:
+            self.event_queue.put((GUI_USER_LOG_OUT,))
+
+    def add_friend(self, friend_login: str = None, friend_id: int = None) -> None:
+        """
+        Запрашиваем данные о клиенте с логином friend_login или id friend_id у сервера
+        :param friend_login:
+        :param friend_id:
+        :return:
+        """
+        message = Message(mes_type=BYTES_COMMAND, sender_id=self.id, receiver_id=SERVER_ID)
+        if not friend_login and not friend_id:
+            return
+        if self.login == friend_login or self.id == friend_id:
+            if not self.event_queue:
+                print("нельзя добавить себя в друзья")
+        if friend_id in self.friendly_users:
+            # TODO проверять по логину и сообщать в гуй
+            if not self.event_queue:
+                print("пользлватель уже у вас в друзьях")
+        if friend_id:
+            message.message = f"{CLIENT_ADD_FRIEND_BY_ID} {friend_id}"
+        elif friend_login:
+            message.message = f"{CLIENT_ADD_FRIEND_BY_LOGIN} {friend_login}"
+
+        send_message_to_client(self.server, message, self.server.symmetric_key)
 
     def send_message(self, message_text: str, receiver_id: int, p2p: bool, secret: bool) -> None:
 
@@ -394,6 +529,21 @@ class Client:
                           receiver_id=receiver_id, sender_id=self.id, secret=secret)
         send_message_to_client(target, message, key)
 
+    def get_message_history(self, friend_id: int, secret: bool, p2p: bool) -> message_item:
+        friend = self.friendly_users[friend_id]
+
+        if not secret and not p2p:
+            message_history = friend.chat
+        elif secret and not p2p:
+            message_history = friend.secret_chat
+        elif not secret and p2p:
+            message_history = friend.p2p_chat
+        elif secret and p2p:
+            message_history = friend.secret_p2p_chat
+
+        for mes_item in message_history:
+            yield mes_item
+
     def add_message_item(self, friend_id: int, mes_item: message_item, p2p: bool, secret: bool):
         friend = self.friendly_users[friend_id]
         if not p2p and not secret:
@@ -404,132 +554,6 @@ class Client:
             friend.p2p_chat.append(mes_item)
         elif p2p and secret:
             friend.secret_p2p_chat.append(mes_item)
-
-    def get_user_command(self) -> None:
-        user_input = get_input("Введите тип команды\n")
-        if not user_input:
-            return
-        message_type = int(user_input)
-        if message_type == CLIENT_REGISTER_USER or message_type == CLIENT_LOG_IN:
-            self.ask_registration_data(message_type)
-        elif message_type == CLIENT_DELETE_USER:
-            self.delete_account()
-        elif message_type == CLIENT_ADD_FRIEND_BY_LOGIN or message_type == CLIENT_ADD_FRIEND_BY_ID:
-            self.ask_friend_login_to_add()
-        elif message_type == CLIENT_LOG_OUT:
-            self.log_out()
-        elif message_type == CLIENT_CREATE_P2P_CONNECTION:
-            user_id = int(get_input("Введите id пользователя\n"))
-            self.create_p2p_connection(user_id)
-        else:
-            pass
-
-    def user_handler(self) -> None:
-        # для сохранения отправляемых p2p сообщений
-        self.thread_locals.message_database = ClientMessageDatabase()
-        print("Список команд для сервера:\n",
-              CLIENT_REGISTER_USER, " - Регистрация {login, password}\n",
-              CLIENT_LOG_IN, " - Вход {login, password}\n",
-              CLIENT_DELETE_USER, " - Удалить аккаунт\n",
-              CLIENT_CREATE_P2P_CONNECTION, " - Создать p2p соединение\n",
-              CLIENT_ADD_FRIEND_BY_LOGIN, " - добавить друга по логину\n",
-              CLIENT_ADD_FRIEND_BY_ID, " - добавить друга по id\n",
-              CLIENT_LOG_OUT, " - Выход\n",
-              sep="")
-        while True:
-            user_input = get_input("Введите тип команды:\n"
-                                   "0 - команда серверу,\n"
-                                   "1 - человеку,\n"
-                                   "2 - человеку напрямую\n"
-                                   "3 - шифр человеку\n"
-                                   "4 - шифр напрямую\n")
-            if not user_input or not user_input.isdigit():
-                continue
-            user_input = int(user_input)
-            if user_input == 0:
-                self.get_user_command()
-            elif user_input == 1:
-                self.ask_user_message()
-            elif user_input == 2:
-                self.ask_user_message(p2p=True)
-            elif user_input == 3:
-                self.ask_user_message(secret=True)
-            elif user_input == 4:
-                self.ask_user_message(p2p=True, secret=True)
-
-    def add_friend(self, friend_login: str = None, friend_id: int = None) -> None:
-        """
-        Запрашиваем данные о клиенте с логином friend_login или id friend_id у сервера
-        :param friend_login:
-        :param friend_id:
-        :return:
-        """
-        message = Message(mes_type=BYTES_COMMAND, sender_id=self.id, receiver_id=SERVER_ID)
-        if not friend_login and not friend_id:
-            return
-        if self.login == friend_login or self.id == friend_id:
-            if not self.event_queue:
-                print("нельзя добавить себя в друзья")
-        if friend_id in self.friendly_users:
-            # TODO проверять по логину и сообщать в гуй
-            if not self.event_queue:
-                print("пользлватель уже у вас в друзьях")
-        if friend_id:
-            message.message = f"{CLIENT_ADD_FRIEND_BY_ID} {friend_id}"
-        elif friend_login:
-            message.message = f"{CLIENT_ADD_FRIEND_BY_LOGIN} {friend_login}"
-
-        send_message_to_client(self.server, message, self.server.symmetric_key)
-
-    def ask_registration_data(self, auth_type: int):
-        if self.id:
-            print("Вы уже вошли")
-            return
-        login = get_input("Введите логин\n")
-        password = get_input("Введите пароль\n")
-        self.log_in(login, password, auth_type)
-
-    def ask_friend_login_to_add(self):
-        friend_login = get_input("Введите логин\n")
-        if friend_login:
-            self.add_friend(friend_login=friend_login)
-
-    def check_login_and_password(self, login: str, password: str) -> bool:
-        # TODO проверить чтоб логин/ пароль не содержали пробелов и т.д. и только после этого отсылать на сервер
-        pass
-
-    def log_in(self, login: str, password: str, auth_type: int) -> None:
-        if self.id:
-            return
-        message = Message(mes_type=BYTES_COMMAND, sender_id=self.id, receiver_id=SERVER_ID, secret=True)
-        self.login = login
-        message.message = get_bytes_string(f"{auth_type} {login} {password}")
-        if auth_type == CLIENT_REGISTER_USER:
-            public_key_bytes = self.public_key.export_key()
-            beg, end = count_spaces_at_the_edges(public_key_bytes)
-            message.message += b' ' + get_bytes_string(f"{beg}") + b' ' + get_bytes_string(f"{end}") + b' ' \
-                               + public_key_bytes
-        send_message_to_client(self.server, message, self.server.symmetric_key)
-
-    def delete_account(self) -> None:
-        message = Message(mes_type=COMMAND, sender_id=self.id, receiver_id=SERVER_ID)
-        message.message = str(CLIENT_DELETE_USER)
-        send_message_to_client(self.server, message, self.server.symmetric_key)
-        self.id = 0
-        if not self.event_queue:
-            print("Пользователь удален")
-        else:
-            self.event_queue.put((GUI_USER_LOG_OUT,))
-
-    def log_out(self) -> None:
-        message = Message(mes_type=COMMAND, sender_id=self.id, receiver_id=SERVER_ID)
-        message.message = str(CLIENT_LOG_OUT)
-        send_message_to_client(self.server, message, self.server.symmetric_key)
-        self.id = 0
-        if not self.event_queue:
-            print("Вы вышли из системы, войдите или зарегистрируйтесь для продолжения")
-        else:
-            self.event_queue.put((GUI_USER_LOG_OUT,))
 
     def create_p2p_connection(self, user_id: int, creator: bool = True) -> None:
         if user_id in self.p2p_connected or user_id == self.id or user_id == SERVER_ID:
@@ -567,6 +591,10 @@ class Client:
     def get_friend_list(self):
         for friend in self.friendly_users.values():
             yield friend.login, friend.id
+
+    def exit_program(self):
+        self.time_to_stop = True
+    # -----------------------------
 
 
 class ReceivedMessageManager:

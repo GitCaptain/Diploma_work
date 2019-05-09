@@ -9,6 +9,7 @@ MESSENGER_NAME = "deep low moan"
 AUTHENTICATION_HANDLERS = 0
 MAIN_WINDOW_HANDLERS = 1
 FRIEND_LIST_HANDLERS = 2
+STOP_BACKEND = 3
 
 HANDLER_REGISTER_BUTTON = 'register'
 HANDLER_ENTER_BUTTON = 'enter'
@@ -435,8 +436,7 @@ class GUI:
         self.login_window = None
         self.chat_window = None
         self.friend_list_window = None
-        # TODO вместе с фронтендом выключать бекенд
-        # self.root.protocol("WM_DELETE_WINDOW", self.on_close)
+        self.root.protocol("WM_DELETE_WINDOW", self.on_close)
 
     def run_authentication_window(self):
 
@@ -550,6 +550,12 @@ class GUI:
             self.on_authentication_window()
         elif event == WINDOW_CHANGE_FRIEND_LIST_WINDOW:
             self.on_friend_list_window()
+        elif event == GUI_BAD_PASSWORD_OR_LOGIN:
+            self.on_bad_login()
+
+    def on_bad_login(self):
+        showerror('Некорректный ввод', 'логин и пароль должны состоять из строчных латинских букв, цифр, '
+                                       'символов подчеркивания и начинаться с буквы')
 
     def on_secret_key_not_stated(self):
         showerror('Ошибка ключа', 'Невозможно начать секретный чат.\nСперва необходимо установить секретный ключ.')
@@ -611,7 +617,8 @@ class GUI:
         if askokcancel("Выйти", "Вы действительно хотите выйти?"):
             self.clear_root()
             self.root.destroy()
-            exit(0)  # Завершаем не только frontend, но и backend
+            # TODO вместе с фронтендом выключать бекенд
+            self.handlers[STOP_BACKEND]()  # Завершаем не только frontend, но и backend
 
 
 if __name__ == '__main__':

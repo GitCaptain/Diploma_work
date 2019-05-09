@@ -2,12 +2,14 @@ from gui2 import *
 from client import *
 import threading
 from queue import Queue
+import sys
 
 if __name__ == '__main__':
 
     event_queue = Queue()
 
     server_address = '192.168.56.1'
+
     user = Client(server_address, event_queue=event_queue)
     user.thread_locals.message_database = ClientMessageDatabase()
     user.thread_locals.users_database = ClientUserDatabase()
@@ -27,7 +29,8 @@ if __name__ == '__main__':
 
     interface_handlers = {AUTHENTICATION_HANDLERS: login_window_handlers,
                           MAIN_WINDOW_HANDLERS: main_window_handlers,
-                          FRIEND_LIST_HANDLERS: friend_list_handlers}
+                          FRIEND_LIST_HANDLERS: friend_list_handlers,
+                          STOP_BACKEND: user.exit_program}
 
     interface = GUI(handlers=interface_handlers, event_queue=event_queue)
 
@@ -36,4 +39,3 @@ if __name__ == '__main__':
     client_thread.start()
     interface.run()
     client_thread.join()
-    # exit(0)
