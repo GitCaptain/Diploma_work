@@ -109,6 +109,15 @@ class Client:
             user_handler_thread.start()
 
     # методы для установки соединения с сервером
+    def connection_init(self):
+        secure_server_tcp_socket = self.connect_and_auth_server((self.server_hostname, PORT_TO_CONNECT))
+        # основной сокет для работы с сервером
+        server_tcp_socket, server_symmetric_key = self.get_server_secret_key(secure_server_tcp_socket)
+        self.server = Friend(public_address=self.server_hostname, sock=server_tcp_socket, client_id=SERVER_ID,
+                             symmetric_key=server_symmetric_key)
+        self.friendly_users[SERVER_ID] = self.server
+        self.private_tcp_address = server_tcp_socket.getsockname()
+
     def connect_and_auth_server(self, server_address: '(str, int)') -> socket:
         """
         Создаем ssl соединение с сервером, тем самым аутентифицируя его
@@ -144,28 +153,21 @@ class Client:
 
     # методы для инициализации клиента
     def main_init(self) -> None:
-        secure_server_tcp_socket = self.connect_and_auth_server((self.server_hostname, PORT_TO_CONNECT))
-        # основной сокет для работы с сервером
-        server_tcp_socket, server_symmetric_key = self.get_server_secret_key(secure_server_tcp_socket)
-        self.server = Friend(public_address=self.server_hostname, sock=server_tcp_socket, client_id=SERVER_ID,
-                             symmetric_key=server_symmetric_key)
-        self.friendly_users[SERVER_ID] = self.server
-        self.private_tcp_address = server_tcp_socket.getsockname()
+
+        self.connection_init()
 
         # сокет для UDP подключений от других клиентов, в случае если не удается установить TCP соединение
         # self.udp_socket = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
         self.p2p_tcp_connection_possible = True
         try:
             if sys.platform.startswith('linux') or sys.platform.startswith('darwin'):  # linux, Mac OS, android
-                server_tcp_socket.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, True)
-                server_tcp_socket.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEPORT, True)
+                self.server.socket.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, True)
+                self.server.socket.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEPORT, True)
             elif sys.platform == 'win32' or sys.platform == 'cygwin':  # windows
                 # on Windows, REUSEADDR already implies REUSEPORT
-                server_tcp_socket.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, True)
+                self.server.socket.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, True)
         except AttributeError:  # Не установлены SO_REUSEPORT или SO_REUSEADDR
             self.p2p_tcp_connection_possible = False
-
-        self.private_tcp_address = server_tcp_socket.getsockname()
 
         if self.p2p_tcp_connection_possible:
             self.max_listen_queue = 5
@@ -400,20 +402,35 @@ class Client:
         self.thread_locals.message_database = ClientMessageDatabase()
         self.thread_locals.users_database = ClientUserDatabase()
         self.thread_locals.message_manager = ReceivedMessageManager(self)
-        p2p = target != self.server
-        try:
-            while True:
+        # Если мы общаемся не с сервером, значит общаемся через p2p
+        p2p = (target != self.server)
+        while True:
+            try:
                 message = get_message_from_client(target)
                 if not message:  # Что-то пошло не так и сервер отключился
                     break
                 self.thread_locals.message_manager.handle(message, p2p)
-
-        except Exception as e:
-            print("Exception: {}".format(e.args))
-            print(traceback.format_exc())
-            print("id:", target.id)
-        finally:
-            pass
+            except ConnectionError as e:
+                if target == self.server:
+                    if not self.event_queue:
+                        print("Соединение разорвано")
+                    else:
+                        self.event_queue.put((GUI_CLIENT_CONNECTION_ERROR, ))
+                    self.connection_init()
+                    self.clear_on_log_out()
+                    self.server_handler()
+                break
+            except Exception as e:
+                if not self.event_queue:
+                    print(f"Exception: {e.args}")
+                    print(traceback.format_exc())
+                    print("id:", target.id)
+                    print("нужно выключить и включить")
+                else:
+                    self.event_queue.put((GUI_CLIENT_ERROR,))
+                break
+            finally:
+                pass
 
     def log_in(self, login: str, password: str, auth_type: int) -> None:
         if self.id:
@@ -448,11 +465,17 @@ class Client:
 
         return check_str(login) and check_str(password)
 
+    def clear_on_log_out(self):
+        self.id = USER_NOT_AUTHENTICATED
+        self.thread_locals.message_database = None
+        self.thread_locals.users_database = None
+        self.thread_locals.message_manager = None
+
     def delete_account(self) -> None:
         message = Message(mes_type=COMMAND, sender_id=self.id, receiver_id=SERVER_ID)
         message.message = str(CLIENT_DELETE_USER)
         send_message_to_client(self.server, message, self.server.symmetric_key)
-        self.id = 0
+        self.clear_on_log_out()
         if not self.event_queue:
             print("Пользователь удален")
         else:
@@ -462,7 +485,7 @@ class Client:
         message = Message(mes_type=COMMAND, sender_id=self.id, receiver_id=SERVER_ID)
         message.message = str(CLIENT_LOG_OUT)
         send_message_to_client(self.server, message, self.server.symmetric_key)
-        self.id = 0
+        self.clear_on_log_out()
         if not self.event_queue:
             print("Вы вышли из системы, войдите или зарегистрируйтесь для продолжения")
         else:

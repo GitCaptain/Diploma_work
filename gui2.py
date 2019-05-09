@@ -552,6 +552,16 @@ class GUI:
             self.on_friend_list_window()
         elif event == GUI_BAD_PASSWORD_OR_LOGIN:
             self.on_bad_login()
+        elif event == GUI_CLIENT_CONNECTION_ERROR:
+            self.on_client_connection_error()
+        elif event == GUI_CLIENT_ERROR:
+            self.on_client_error()
+
+    def on_client_connection_error(self):
+        showerror("Ошибка", "Соединение разорвано. Переподключаюсь")
+
+    def on_client_error(self):
+        showerror("Ошибка", "Перезапустите приложение")
 
     def on_bad_login(self):
         showerror('Некорректный ввод', 'логин и пароль должны состоять из строчных латинских букв, цифр, '
