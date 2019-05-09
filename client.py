@@ -98,6 +98,7 @@ class Client:
         self.connector = Peer2PeerConnector(self)
         self.public_key = self.private_key = None
         self.time_to_stop = False
+        self.socket_operations_timeout_sec = 3
 
     def run(self) -> None:
         self.main_init()
@@ -129,10 +130,10 @@ class Client:
         secure_context.check_hostname = False
         server_socket = socket.socket(family=socket.AF_INET, type=socket.SOCK_STREAM)
         secure_server_socket = secure_context.wrap_socket(server_socket)
-        while not connect_to_address(secure_server_socket, server_address):
+        while not connect_to_address(secure_server_socket, server_address) and not self.time_to_stop:
             if not self.event_queue:
                 print("подключение не удалось")
-            time.sleep(3)  # Ждем, несколько секунд, прежде чем подключиться снова
+            time.sleep(self.socket_operations_timeout_sec)  # Ждем, несколько секунд, прежде чем подключиться снова
         if not self.event_queue:
             print("Подключено")
         return secure_server_socket
@@ -403,6 +404,7 @@ class Client:
         self.thread_locals.users_database = ClientUserDatabase()
         self.thread_locals.message_manager = ReceivedMessageManager(self)
         # Если мы общаемся не с сервером, значит общаемся через p2p
+        target.socket.settimeout(self.socket_operations_timeout_sec)
         p2p = (target != self.server)
         while True:
             try:
@@ -420,6 +422,14 @@ class Client:
                     self.clear_on_log_out()
                     self.server_handler()
                 break
+            except socket.timeout:
+                if self.time_to_stop:
+                    message = Message(mes_type=COMMAND, receiver_id=target.id, sender_id=self.id,
+                                      message=f"{CLIENT_SHUTDOWN}")
+                    send_message_to_client(target, message, target.symmetric_key)
+                    target.socket.shutdown(socket.SHUT_RDWR)
+                    target.socket.close()
+                    break
             except Exception as e:
                 if not self.event_queue:
                     print(f"Exception: {e.args}")
@@ -617,6 +627,7 @@ class Client:
 
     def exit_program(self):
         self.time_to_stop = True
+
     # -----------------------------
 
 

@@ -128,7 +128,9 @@ class Server:
                 send_message_to_client(receiver, message, receiver.symmetric_key)
 
             return True
-
+        elif command == CLIENT_SHUTDOWN:
+            # Вызываем ошибку, которая будет обработана в process_client и аккуратно завершит сеанс
+            raise ConnectionError
         else:
             pass
 
@@ -351,6 +353,9 @@ class Server:
                     self.process_command(user, message)
                 else:
                     pass
+        except ConnectionError:
+            # Клиент отключился, ничего страшного
+            pass
         except Exception as e:
             print(traceback.format_exc())
             print("Exception: {}".format(e.args))

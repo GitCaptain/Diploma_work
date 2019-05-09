@@ -40,6 +40,7 @@ CLIENT_LOG_OUT = 6
 CLIENT_GET_MESSAGES = 7
 CLIENT_CREATE_P2P_CONNECTION = 8
 CLIENT_SYMMETRIC_KEY_EXCHANGE = 9
+CLIENT_SHUTDOWN = 10
 
 # command for client and gui, they must not intersect with commands to server from client and server responses
 GUI_FRIEND_ITEM = -1
