@@ -12,6 +12,7 @@ import os
 from collections import namedtuple
 from queue import Queue
 
+
 def get_input(prompt_str: str) -> str:
     return input(prompt_str).strip()
 
@@ -1104,7 +1105,7 @@ class Peer2PeerConnector:
 
 def main():
 
-    address = '192.168.56.1'
+    address = SERVER_ADDRESS
     if len(sys.argv) > 1:
         address = sys.argv[1]
 

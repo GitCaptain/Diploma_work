@@ -392,10 +392,7 @@ class Server:
     def run(self) -> None:
         command_handler = threading.Thread(target=self.server_command_handler)
         command_handler.start()
-        print("the server is running\nhost: {}, port: {}".format(
-            socket.gethostbyname(socket.getfqdn()),
-            PORT_TO_CONNECT)
-        )
+        print(f"the server is running\nhost: {socket.gethostbyname(socket.getfqdn())}, port: {PORT_TO_CONNECT}")
         secure_context = ssl.create_default_context(purpose=ssl.Purpose.CLIENT_AUTH)
         secure_context.load_cert_chain(certfile='secure/server.pem', keyfile='secure/server.key')
         while True:

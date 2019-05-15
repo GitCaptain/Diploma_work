@@ -8,7 +8,7 @@ if __name__ == '__main__':
 
     event_queue = Queue()
 
-    server_address = '192.168.56.1'
+    server_address = SERVER_ADDRESS
 
     user = Client(server_address, event_queue=event_queue)
     user.thread_locals.message_database = ClientMessageDatabase()
