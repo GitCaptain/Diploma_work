@@ -76,6 +76,8 @@ class Friend(User):
 
 class Client:
 
+    SECURE_FOLDER = 'secure' + os.sep
+
     def __init__(self, server_hostname: str = 'localhost', event_queue: Queue=None):
         """
 
@@ -102,7 +104,10 @@ class Client:
         self.socket_operations_timeout_sec = 3
 
     def run(self) -> None:
-        self.main_init()
+        try:
+            self.main_init()
+        except:
+            return
         server_handler_thread = threading.Thread(target=self.server_handler)
         server_handler_thread.start()
 
@@ -114,6 +119,9 @@ class Client:
     def connection_init(self):
         secure_server_tcp_socket = self.connect_and_auth_server((self.server_hostname, PORT_TO_CONNECT))
         # основной сокет для работы с сервером
+        if not secure_server_tcp_socket:
+            # какие-то проблемы с установкой соединения
+            raise ConnectionError
         server_tcp_socket, server_symmetric_key = self.get_server_secret_key(secure_server_tcp_socket)
         self.server = Friend(public_address=self.server_hostname, sock=server_tcp_socket, client_id=SERVER_ID,
                              symmetric_key=server_symmetric_key)
@@ -126,7 +134,18 @@ class Client:
         :param server_address:
         :return: ssl socket, который будет использоваться для безопасного установления общего симметричного ключа
         """
-        secure_context = ssl.create_default_context(cafile='secure/CA.pem')
+
+        ca_name = 'ca.pem'
+        ca_path = Client.SECURE_FOLDER + ca_name
+        if not os.path.exists(ca_path):
+            err_mes = "Сертификат проверки подлинности сервера не обнаружен.\nПереустановите приложение."
+            if not self.event_queue:
+                print(err_mes)
+            else:
+                self.event_queue.put((GUI_CLIENT_ERROR, err_mes))
+            self.time_to_stop = True
+            return
+        secure_context = ssl.create_default_context(cafile=ca_path)
         # обязательно вернуть ТРУ, когда будет сервер нейм, либо разобраться с альтнеймами в серитфикатах
         secure_context.check_hostname = False
         server_socket = socket.socket(family=socket.AF_INET, type=socket.SOCK_STREAM)
@@ -156,8 +175,10 @@ class Client:
     # методы для инициализации клиента
     def main_init(self) -> None:
 
-        self.connection_init()
-
+        try:
+            self.connection_init()
+        except:
+            raise ConnectionError
         # сокет для UDP подключений от других клиентов, в случае если не удается установить TCP соединение
         # self.udp_socket = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
         self.p2p_tcp_connection_possible = True
@@ -213,21 +234,22 @@ class Client:
         Создаем ассиметричные ключи, если они еще не были созданы, иначе загружем их
         :return:
         """
-        secure = 'secure' + os.sep
-        if not os.path.exists(secure + 'private.pem') or not os.path.exists(secure + 'public.pem'):
-            if not os.path.exists(secure):
+        private_path = Client.SECURE_FOLDER + 'private.pem'
+        public_path = Client.SECURE_FOLDER + 'public.pem'
+        if not os.path.exists(private_path) or not os.path.exists(public_path):
+            if not os.path.exists(Client.SECURE_FOLDER):
                 # нет даже нужной папки, создаем
-                os.mkdir(secure)
+                os.mkdir(Client.SECURE_FOLDER)
             # либо ключ еще не был создан, либо с ним что-то случилось, генерируем новую пару
             key_pair = RSA.generate(RSA_KEY_LEN_IN_BITS)
             self.private_key = key_pair
             self.public_key = key_pair.publickey()
-            with open(secure + 'private.pem', 'wb') as priv, open(secure + 'public.pem', 'wb') as publ:
+            with open(private_path, 'wb') as priv, open(public_path, 'wb') as publ:
                 priv.write(self.private_key.export_key())
                 publ.write(self.public_key.export_key())
         else:
             # возвращаем сохраненный ключ
-            with open(secure + 'private.pem', 'rb') as priv, open(secure + 'public.pem', 'rb') as publ:
+            with open(private_path, 'rb') as priv, open(public_path, 'rb') as publ:
                 self.private_key = RSA.import_key(priv.read())
                 self.public_key = RSA.import_key(publ.read())
 
@@ -421,10 +443,14 @@ class Client:
                     if not self.event_queue:
                         print("Соединение разорвано")
                     else:
-                        self.event_queue.put((GUI_CLIENT_CONNECTION_ERROR, ))
-                    self.connection_init()
-                    self.clear_on_log_out()
-                    self.server_handler()
+                        self.event_queue.put((GUI_CLIENT_ERROR, "Соединение разорвано. Переподключаюсь"))
+                    try:
+                        self.connection_init()
+                    except ConnectionError:
+                        self.clear_on_log_out()
+                    else:
+                        self.clear_on_log_out()
+                        self.server_handler()
                 break
             except socket.timeout:
                 if self.time_to_stop:
@@ -441,7 +467,7 @@ class Client:
                     print("id:", target.id)
                     print("нужно выключить и включить")
                 else:
-                    self.event_queue.put((GUI_CLIENT_ERROR,))
+                    self.event_queue.put((GUI_CLIENT_ERROR, ))
                 break
             finally:
                 pass
