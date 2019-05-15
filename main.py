@@ -2,7 +2,6 @@ from gui2 import *
 from client import *
 import threading
 from queue import Queue
-import sys
 
 if __name__ == '__main__':
 

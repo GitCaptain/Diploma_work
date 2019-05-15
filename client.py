@@ -215,6 +215,9 @@ class Client:
         """
         secure = 'secure' + os.sep
         if not os.path.exists(secure + 'private.pem') or not os.path.exists(secure + 'public.pem'):
+            if not os.path.exists(secure):
+                # нет даже нужной папки, создаем
+                os.mkdir(secure)
             # либо ключ еще не был создан, либо с ним что-то случилось, генерируем новую пару
             key_pair = RSA.generate(RSA_KEY_LEN_IN_BITS)
             self.private_key = key_pair

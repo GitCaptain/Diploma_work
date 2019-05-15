@@ -12,6 +12,9 @@ class Database:
     def __init__(self, path: str):
         try:
             if not os.path.exists(path):
+                _dir, file = os.path.split(path)
+                if not os.path.exists(_dir):
+                    os.mkdir(_dir)  # создаем папку, в которой будет лежать БД
                 open(path, 'w+').close()  # Создаем файл базы данных, если его еще не было
             self.database_connection = sql.connect(path)
         except sql.Error as e:
