@@ -51,7 +51,7 @@ def RSA_encrypt(rsa_key: RSA.RsaKey, message: bytes) -> bytes:
 # Будет использоваться для представления сообщений в списках сообщений клиента.
 # is_sender - True, если клиент является отправителем, иначе False,
 # message - само сообщение
-message_item = namedtuple("message_item", "is_sender message")
+message_item = namedtuple("message_item", "is_sender message type")
 
 
 class Friend(User):
@@ -77,6 +77,7 @@ class Friend(User):
 class Client:
 
     SECURE_FOLDER = 'secure' + os.sep
+    FILE_STORAGE_FOLDER = 'storage' + os.sep
 
     def __init__(self, server_hostname: str = 'localhost', event_queue: Queue=None):
         """
@@ -319,7 +320,19 @@ class Client:
         else:
             mes_list = self.friendly_users[friend_id].p2p_chat
         for message in message_generator:
-            mes_list.append(message_item(not message[DB_COLUMN_NAME_MESSAGE_RECEIVED], message[DB_COLUMN_NAME_MESSAGE]))
+            mes_text = message[DB_COLUMN_NAME_MESSAGE]
+            mes_type = message[DB_COLUMN_NAME_MESSAGE_TYPE]
+            if mes_type == FILE:
+                first_space = mes_text.find(b' ')
+                file = mes_text[first_space+1:]
+                mes_text = mes_text[:first_space]
+                full_path = Client.FILE_STORAGE_FOLDER + mes_text
+                if not os.path.exists(full_path):
+                    with open(full_path, 'wb+') as F:
+                        F.write(file)
+
+            mes_text = get_text_from_bytes_data(mes_text)
+            mes_list.append(message_item(not message[DB_COLUMN_NAME_MESSAGE_RECEIVED], mes_text, mes_type))
     # -----------------------------
 
     # методы для взаимодействия с пользователем в консольном режиме
@@ -341,20 +354,24 @@ class Client:
                                    "1 - человеку,\n"
                                    "2 - человеку напрямую\n"
                                    "3 - шифр человеку\n"
-                                   "4 - шифр напрямую\n")
+                                   "4 - шифр напрямую\n"
+                                   "5 - файл человеку\n"
+                                   "6 - файл напрямую\n"
+                                   "7 - шифр файл\n"
+                                   "8 - шифр файл напрямую\n")
             if not user_input or not user_input.isdigit():
                 continue
             user_input = int(user_input)
             if user_input == 0:
                 self.get_user_command()
-            elif user_input == 1:
-                self.ask_user_message()
-            elif user_input == 2:
-                self.ask_user_message(p2p=True)
-            elif user_input == 3:
-                self.ask_user_message(secret=True)
-            elif user_input == 4:
-                self.ask_user_message(p2p=True, secret=True)
+            elif user_input == 1 or user_input == 5:
+                self.ask_user_message(file=(user_input == 5))
+            elif user_input == 2 or user_input == 6:
+                self.ask_user_message(p2p=True, file=(user_input == 6))
+            elif user_input == 3 or user_input == 7:
+                self.ask_user_message(secret=True, file=(user_input == 7))
+            elif user_input == 4 or user_input == 8:
+                self.ask_user_message(p2p=True, secret=True, file=(user_input == 8))
 
     def get_user_command(self) -> None:
         user_input = get_input("Введите тип команды\n")
@@ -385,7 +402,7 @@ class Client:
                 print("rcv: ", end='')
             print(mes_item.message)
 
-    def ask_user_message(self, p2p=False, secret=False) -> None:
+    def ask_user_message(self, p2p=False, secret=False, file=False) -> None:
         if self.id == USER_NOT_AUTHENTICATED:
             print("Невозможно отправить сообщение. Сперва необходимо войти или зарегистрироваться")
             return
@@ -403,9 +420,31 @@ class Client:
 
         self.print_message_history(receiver_id, secret, p2p)
 
-        message_text = get_input("Введите сообщение:\n")
+        inp_text = "Введите сообщение:\n"
+        if file:
+            inp_text = "Введите путь к файлу:\n"
 
-        self.send_message(message_text, receiver_id, p2p, secret)
+        message_text = get_input(inp_text)
+
+        if file:
+            _, _file = os.path.split(message_text)
+            try:
+                if not _file:
+                    # скорее всего неправильный формат пути, например '../file.txt/' - '/' в конце не нужен
+                    raise FileNotFoundError
+                # заменяем пробелы подчеркиванием, чтоб потом было легко отделить название файла от самого файла
+                _file.replace(' ', '_')
+                with open(message_text, 'rb') as F:
+                    message_text = F.read()
+                message_text = get_bytes_string(_file + ' ') + message_text
+            except FileNotFoundError:
+                print("Такого файла не существует")
+                return
+            except Exception:
+                print("Неизвестная ошибка")
+                return
+
+        self.send_message(message_text, receiver_id, p2p, secret, file)
 
     def ask_registration_data(self, auth_type: int):
         if self.id:
@@ -547,7 +586,7 @@ class Client:
         if friend_id in self.friendly_users:
             # TODO проверять по логину и сообщать в гуй
             if not self.event_queue:
-                print("пользлватель уже у вас в друзьях")
+                print("пользователь уже у вас в друзьях")
         if friend_id:
             message.message = f"{CLIENT_ADD_FRIEND_BY_ID} {friend_id}"
         elif friend_login:
@@ -555,7 +594,8 @@ class Client:
 
         send_message_to_client(self.server, message, self.server.symmetric_key)
 
-    def send_message(self, message_text: str, receiver_id: int, p2p: bool, secret: bool) -> None:
+    def send_message(self, message_text: str or bytes, receiver_id: int, p2p: bool, secret: bool, file: bool) \
+            -> None:
 
         if secret:
             receiver = self.friendly_users[receiver_id]
@@ -581,14 +621,20 @@ class Client:
                     self.event_queue.put((GUI_CONNECTION_NOT_ESTABLISHED,))
                 return
 
+        if file:
+            _type = FILE
+        else:
+            _type = MESSAGE
+
         if p2p:
             # Добавляем сообщение в локальную БД пользователя
-            self.thread_locals.message_database.add_message(receiver_id, False, secret, message_text)
+            self.thread_locals.message_database.add_message(receiver_id, False, secret, get_bytes_string(message_text),
+                                                            _type)
 
-        mes_item = message_item(True, message_text)
+        mes_item = message_item(True, message_text, _type)
         self.add_message_item(receiver_id, mes_item, p2p, secret)
 
-        message = Message(mes_type=MESSAGE, message=message_text,
+        message = Message(mes_type=_type, message=message_text,
                           receiver_id=receiver_id, sender_id=self.id, secret=secret)
         send_message_to_client(target, message, key)
 
@@ -683,12 +729,12 @@ class ReceivedMessageManager:
             message.message = get_decrypted_message(message.message, key, message.tag, message.nonce, message.secret)
 
         # Если сообщение должно быть текстовым, то его нужно преобразовать к такому виду
-        if message.type != BYTES_COMMAND and message.type != BYTES_MESSAGE:
+        if message.type != BYTES_COMMAND and message.type != FILE:
             message.message = get_text_from_bytes_data(message.message)
 
         if message.type == COMMAND or message.type == BYTES_COMMAND:
             self.command_handler(message)
-        elif message.type == MESSAGE or message.type == BYTES_MESSAGE:
+        elif message.type == MESSAGE or message.type == FILE:
             self.message_handler(message, p2p)
         else:
             pass

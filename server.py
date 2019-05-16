@@ -339,7 +339,7 @@ class Server:
                     break
 
                 if self.thread_locals.user_authenticated and (message.type == MESSAGE or
-                                                              message.type == BYTES_MESSAGE):
+                                                              message.type == FILE):
                     # пользовательские сообщения пересылаются и добавляются в БД как есть,
                     # без расшифровки и приведения к текстовому виду
                     self.process_message(message)

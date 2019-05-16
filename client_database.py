@@ -17,6 +17,7 @@ DB_COLUMN_NAME_MESSAGE = "message"
 DB_COLUMN_NAME_FRIEND_PUBLIC_KEY = "public_key"
 DB_COLUMN_NAME_FRIEND_ID = "id"
 DB_COLUMN_NAME_LOGIN = "login"
+DB_COLUMN_NAME_MESSAGE_TYPE = 'mes_type'
 
 DB_COLUMN_PROPERTY_TEXT = "TEXT"
 DB_COLUMN_PROPERTY_INTEGER = "INTEGER"
@@ -51,16 +52,19 @@ class ClientMessageDatabase(MessageDatabase):
             table_name += f"{friend_id}"
 
         columns = (f"{DB_COLUMN_NAME_MESSAGE_RECEIVED} {DB_COLUMN_PROPERTY_INTEGER} {DB_COLUMN_PROPERTY_NOT_NULL}",
-                   f"{DB_COLUMN_NAME_MESSAGE} {DB_COLUMN_PROPERTY_TEXT} {DB_COLUMN_PROPERTY_NOT_NULL}")
+                   f"{DB_COLUMN_NAME_MESSAGE} {DB_COLUMN_PROPERTY_TEXT} {DB_COLUMN_PROPERTY_NOT_NULL}",
+                   f"{DB_COLUMN_NAME_MESSAGE_TYPE} {DB_COLUMN_PROPERTY_INTEGER} {DB_COLUMN_PROPERTY_NOT_NULL}")
         self.create_table_if_not_exist(table_name, columns)
 
-    def add_message(self, friend_id: int, message_received: bool, message_secret: bool, message: str) -> None:
+    def add_message(self, friend_id: int, message_received: bool, message_secret: bool, message: bytes, mes_type: int) \
+            -> None:
         """
         Добавляем сообщение message в диалог с friend_id
         :param friend_id:
         :param message_received: True, если сообщение получено, False, если отправлено
         :param message_secret: True, если сообщение секретно, False, если нет
         :param message:
+        :param mes_type: FILE или MESSAGE
         :return:
         """
         if message_secret:
@@ -71,7 +75,7 @@ class ClientMessageDatabase(MessageDatabase):
 
         if not self.check_if_table_exist(table_name=tb_name):
             self.create_message_table(table_name=tb_name)
-        row_values = (message_received, message)
+        row_values = (message_received, memoryview(message), mes_type)
         self.insert_into_table(tb_name, row_values)
 
     def get_message_history(self, friend_id: int, get_secret: bool = False) -> sql.Row:
