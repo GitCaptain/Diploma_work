@@ -48,6 +48,26 @@ def RSA_encrypt(rsa_key: RSA.RsaKey, message: bytes) -> bytes:
     return cipher_rsa.encrypt(message)
 
 
+def save_file(file, rewrite=False):
+    """
+    Сохранение файла на диске
+    :param file: последовательность байт вида b'file_name file'
+    :param rewrite: нужно ли перезаписывать файл, если он уже существует
+    :return: имя под которым сохранен файл
+    """
+    storage = Client.FILE_STORAGE_FOLDER
+    first_space = file.find(b' ')
+    file_name = get_text_from_bytes_data(file[:first_space])
+    file_data = file[first_space + 1:]
+    if not os.path.exists(storage):
+        os.mkdir(storage)
+    if not os.path.exists(storage+file_name) or rewrite:
+        # перезапишет файл file_name, если он уже существует
+        with open(Client.FILE_STORAGE_FOLDER + file_name, 'wb') as F:
+            F.write(file_data)
+    return file_name
+
+
 # Будет использоваться для представления сообщений в списках сообщений клиента.
 # is_sender - True, если клиент является отправителем, иначе False,
 # message - само сообщение
@@ -323,15 +343,10 @@ class Client:
             mes_text = message[DB_COLUMN_NAME_MESSAGE]
             mes_type = message[DB_COLUMN_NAME_MESSAGE_TYPE]
             if mes_type == FILE:
-                first_space = mes_text.find(b' ')
-                file = mes_text[first_space+1:]
-                mes_text = mes_text[:first_space]
-                full_path = Client.FILE_STORAGE_FOLDER + mes_text
-                if not os.path.exists(full_path):
-                    with open(full_path, 'wb+') as F:
-                        F.write(file)
-
-            mes_text = get_text_from_bytes_data(mes_text)
+                file_name = save_file(mes_text)
+                mes_text = f'FILE saved as {file_name} in {Client.FILE_STORAGE_FOLDER}'
+            else:
+                mes_text = get_text_from_bytes_data(mes_text)
             mes_list.append(message_item(not message[DB_COLUMN_NAME_MESSAGE_RECEIVED], mes_text, mes_type))
     # -----------------------------
 
@@ -800,7 +815,8 @@ class ReceivedMessageManager:
         self.add_session_key(data)
 
     def on_db_message(self, data):
-        self.add_message_from_server_database(data)
+        #self.add_message_from_server_database(data)
+        pass
 
     def on_user_offline(self, data):
         # data = [.., 'id']
@@ -888,18 +904,25 @@ class ReceivedMessageManager:
         sender = self.client.friendly_users[message.sender_id]
 
         # Добавляем в список сообщений клиента
-        mes_item = message_item(False, message.message)
+        mes_item = message_item(False, message.message, message.type)
         self.client.add_message_item(sender.id, mes_item, p2p, message.secret)
+
+        if message.type == FILE:
+            file_name = save_file(message.message, rewrite=True)
+            mes_text = f'FILE saved as {file_name} in {Client.FILE_STORAGE_FOLDER}'
+        else:
+            mes_text = message.message
 
         # отображаем
         if not self.client.event_queue:
-            print("received from:\n", message.sender_id, "\nmessage:\n", message.message, sep="")
+            print("received from:\n", message.sender_id, "\nmessage:\n", mes_text, sep="")
         else:
-            self.client.event_queue.put((GUI_MESSAGE_ITEM, message.sender_id, message.message, message.secret, p2p))
+            self.client.event_queue.put((GUI_MESSAGE_ITEM, message.sender_id, mes_text, message.secret, p2p))
 
         # Добавляем в БД, только p2p сообщения, остальные хранятся в БД сервера
         if p2p:
-            self.client.thread_locals.message_database.add_message(sender.id, True, message.secret, message.message)
+            self.client.thread_locals.message_database.add_message(sender.id, True, message.secret, message.message,
+                                                                   message.type)
 
     def add_session_key(self, session_key_info: list) -> None:
         # session_key_info = [..., b'session_id', b'spaces_at_begin', b'spaces_at_end', b'key']
@@ -913,11 +936,11 @@ class ReceivedMessageManager:
         """
         Добавляет сообщения пришедшие из БД сервера в список сообщений пользователя
         :param message_info: строка байт данных о сообщении пришедшем с сервера, может быть нескольких видов:
-        1) b'MESSAGE_FROM_DATABASE sender_id receiver_id message'
-        2) b'SECRET_MESSAGE_FROM_DATABASE data sender_id receiver_id session_id'
-        3) b'SECRET_MESSAGE_FROM_DATABASE mes message'
-        4) b'SECRET_MESSAGE_FROM_DATABASE tag tag'
-        5) b'SECRET_MESSAGE_FROM_DATABASE nonce nonce'
+        1) b'SERVER_MESSAGE_FROM_DATABASE sender_id receiver_id message'
+        2) b'SERVER_SECRET_MESSAGE_FROM_DATABASE data sender_id receiver_id session_id'
+        3) b'SERVER_SECRET_MESSAGE_FROM_DATABASE mes message'
+        4) b'SERVER_SECRET_MESSAGE_FROM_DATABASE tag tag'
+        5) b'SERVER_SECRET_MESSAGE_FROM_DATABASE nonce nonce'
         Если пришло сообщение первого типа, можно сразу добавлять его в список сообщений,
         остальные 4 сообщения должны приходить подряд и добавить сообщение можно будет только
         когда придет последнее
