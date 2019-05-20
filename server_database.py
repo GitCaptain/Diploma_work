@@ -32,6 +32,7 @@ DB_COLUMN_NAME_USER_PASSWORD = "hashed_password"
 DB_COLUMN_NAME_USER_PUBLIC_KEY = "public_key"
 DB_COLUMN_NAME_SALT_LEFT = "saltl"
 DB_COLUMN_NAME_SALT_RIGHT = "saltr"
+DB_COLUMN_NAME_MESSAGE_TYPE = 'message_type'
 
 DB_COLUMN_PROPERTY_TEXT = "TEXT"
 DB_COLUMN_PROPERTY_INTEGER = "INTEGER"
@@ -43,7 +44,7 @@ class ServerMessageDatabase(MessageDatabase):
     """
     Класс для работы с базой данных сообщений хранящихся на сервере,
     таблица содержащая переписку или какие-то другие данные 2х клиентов всегда имеет имя типа "prefix_id1_id2",
-    где id1 < id2, suffix - некоторая константа DB_PREFIX
+    где id1 < id2, prefix - некоторая константа DB_PREFIX
     """
     def __init__(self, path: str = DB_PATH_MESSAGE, need_server_init: bool = False):
         super().__init__(path=path)
@@ -73,7 +74,8 @@ class ServerMessageDatabase(MessageDatabase):
             table_name = f"{DB_PREFIX_MESSAGE_HISTORY}{DB_SEP}{min(id1, id2)}{DB_SEP}{max(id1, id2)}"
         columns = (f"{DB_COLUMN_NAME_SENDER_ID} {DB_COLUMN_PROPERTY_INTEGER} {DB_COLUMN_PROPERTY_NOT_NULL}",
                    f"{DB_COLUMN_NAME_RECEIVER_ID} {DB_COLUMN_PROPERTY_INTEGER} {DB_COLUMN_PROPERTY_NOT_NULL}",
-                   f"{DB_COLUMN_NAME_MESSAGE} {DB_COLUMN_PROPERTY_TEXT} {DB_COLUMN_PROPERTY_NOT_NULL}")
+                   f"{DB_COLUMN_NAME_MESSAGE} {DB_COLUMN_PROPERTY_TEXT} {DB_COLUMN_PROPERTY_NOT_NULL}",
+                   f"{DB_COLUMN_NAME_MESSAGE_TYPE} {DB_COLUMN_PROPERTY_INTEGER} {DB_COLUMN_PROPERTY_NOT_NULL}")
         self.create_table(table_name, columns)
 
     def create_secret_message_table(self, id1: int = None, id2: int = None, table_name: str = None) -> None:
@@ -99,7 +101,8 @@ class ServerMessageDatabase(MessageDatabase):
                    f"{DB_COLUMN_NAME_RECEIVER_ID} {DB_COLUMN_PROPERTY_INTEGER} {DB_COLUMN_PROPERTY_NOT_NULL}",
                    f"{DB_COLUMN_NAME_MESSAGE} {DB_COLUMN_PROPERTY_TEXT} {DB_COLUMN_PROPERTY_NOT_NULL}",
                    f"{DB_COLUMN_NAME_MESSAGE_TAG} {DB_COLUMN_PROPERTY_TEXT} {DB_COLUMN_PROPERTY_NOT_NULL}",
-                   f"{DB_COLUMN_NAME_MESSAGE_NONCE} {DB_COLUMN_PROPERTY_TEXT} {DB_COLUMN_PROPERTY_NOT_NULL}")
+                   f"{DB_COLUMN_NAME_MESSAGE_NONCE} {DB_COLUMN_PROPERTY_TEXT} {DB_COLUMN_PROPERTY_NOT_NULL}",
+                   f"{DB_COLUMN_NAME_MESSAGE_TYPE} {DB_COLUMN_PROPERTY_INTEGER} {DB_COLUMN_PROPERTY_NOT_NULL}")
         self.create_table(table_name, columns)
 
     def create_session_keys_table(self, id1: int, id2: int) -> None:
@@ -131,23 +134,24 @@ class ServerMessageDatabase(MessageDatabase):
                    f"{DB_COLUMN_NAME_SECOND_CLIENT} {DB_COLUMN_PROPERTY_INTEGER} {DB_COLUMN_PROPERTY_NOT_NULL}")
         self.create_table_if_not_exist(table_name, columns)
 
-    def add_message(self, sender_id: int, receiver_id: int, message: bytes) -> None:
+    def add_message(self, sender_id: int, receiver_id: int, message: bytes, message_type: int) -> None:
         """
         Добавление не шифрованного сообщения в таблицу сосбщений.
         :param sender_id:
         :param receiver_id:
         :param message:
+        :param message_type:
         :return:
         """
         tb_name = f"{DB_PREFIX_MESSAGE_HISTORY}{DB_SEP}{min(sender_id, receiver_id)}{DB_SEP}" \
                   f"{max(sender_id, receiver_id)}"
         if not self.check_if_table_exist(table_name=tb_name):
             self.create_message_table(table_name=tb_name)
-        row_values = (sender_id, receiver_id, memoryview(message))
+        row_values = (sender_id, receiver_id, memoryview(message), message_type)
         self.insert_into_table(tb_name, row_values)
 
     def add_secret_message(self, session_id: int, sender_id: int, receiver_id: int, message: bytes, message_tag: bytes,
-                           message_nonce: bytes) -> None:
+                           message_nonce: bytes, message_type: int) -> None:
         """
         Добавление шифрованного сообщения в таблицу
         :param session_id:
@@ -156,6 +160,7 @@ class ServerMessageDatabase(MessageDatabase):
         :param message:
         :param message_tag:
         :param message_nonce:
+        :param message_type:
         :return:
         """
         tb_name = f"{DB_PREFIX_SECRET_MESSAGES_HISTORY}{DB_SEP}{min(sender_id, receiver_id)}{DB_SEP}" \
@@ -163,7 +168,7 @@ class ServerMessageDatabase(MessageDatabase):
         if not self.check_if_table_exist(table_name=tb_name):
             self.create_secret_message_table(table_name=tb_name)
         row_values = (session_id, sender_id, receiver_id,
-                      memoryview(message), memoryview(message_tag), memoryview(message_nonce))
+                      memoryview(message), memoryview(message_tag), memoryview(message_nonce), message_type)
         self.insert_into_table(tb_name, row_values)
 
     def add_session_key_pair(self, session_id: int, id1: int, id2: int, key_encrypted_by_first_id: bytes,

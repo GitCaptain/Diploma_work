@@ -176,7 +176,8 @@ class Server:
             message.message = get_bytes_string(f"{SERVER_MESSAGE_FROM_DATABASE} "
                                                f"{db_mes[DB_COLUMN_NAME_SENDER_ID]} "
                                                f"{db_mes[DB_COLUMN_NAME_RECEIVER_ID]} ") \
-                              + db_mes[DB_COLUMN_NAME_MESSAGE]
+                              + db_mes[DB_COLUMN_NAME_MESSAGE] \
+                              + get_bytes_string(f" {db_mes[DB_COLUMN_NAME_MESSAGE_TYPE]}")
             send_message_to_client(user, message, user.symmetric_key)
 
     def send_encrypted_message_history(self, user: User, users_friend_id: int) -> None:
@@ -210,7 +211,9 @@ class Server:
                                                f"{db_mes[DB_COLUMN_NAME_SENDER_ID]} "
                                                f"{db_mes[DB_COLUMN_NAME_RECEIVER_ID]} {session_id}")
             send_message_to_client(user, message, user.symmetric_key)
-            message.message = get_bytes_string(f"{SERVER_SECRET_MESSAGE_FROM_DATABASE} mes ") + db_mes[DB_COLUMN_NAME_MESSAGE]
+            message.message = get_bytes_string(f"{SERVER_SECRET_MESSAGE_FROM_DATABASE} mes ") \
+                              + db_mes[DB_COLUMN_NAME_MESSAGE] \
+                              + get_bytes_string(f" {db_mes[DB_COLUMN_NAME_MESSAGE_TYPE]}")
             send_message_to_client(user, message, user.symmetric_key)
             message.message = get_bytes_string(f"{SERVER_SECRET_MESSAGE_FROM_DATABASE} tag ") + \
                               db_mes[DB_COLUMN_NAME_MESSAGE_TAG]
@@ -313,11 +316,13 @@ class Server:
                                                                         receiver_id=message.receiver_id,
                                                                         message=message.message,
                                                                         message_tag=message.tag,
-                                                                        message_nonce=message.nonce)
+                                                                        message_nonce=message.nonce,
+                                                                        message_type=message.type)
             else:
                 self.thread_locals.messages_database.add_message(sender_id=message.sender_id,
                                                                  receiver_id=message.receiver_id,
-                                                                 message=message.message)
+                                                                 message=message.message,
+                                                                 message_type=message.type)
         else:
             receiver = self.authenticated_users[message.sender_id]
             message.receiver_id = message.sender_id

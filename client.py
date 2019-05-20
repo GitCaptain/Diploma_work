@@ -68,6 +68,23 @@ def save_file(file, rewrite=False):
     return file_name
 
 
+def extract_message(mes_text, mes_type):
+    """
+    "Вытаскивает" текст из сообщения, т.е. если тип mes_type == FILE, то сохраняет файл на диск и возвращает шаблонную
+    строку с информацией, иначе, если mes_type == MESSAGE, то конвертирует байты в строку и возвращает читаемый текст
+    :param mes_text: сообщение, которое нужно преобразовать
+    :param mes_type: тип сообщения
+    :return:
+    """
+    if mes_type == FILE:
+        file_name = save_file(mes_text)
+        mes_text = f'FILE saved as {file_name} in {Client.FILE_STORAGE_FOLDER}'
+    else:
+        if not isinstance(mes_text, str):
+            mes_text = get_text_from_bytes_data(mes_text)
+    return mes_text
+
+
 # Будет использоваться для представления сообщений в списках сообщений клиента.
 # is_sender - True, если клиент является отправителем, иначе False,
 # message - само сообщение
@@ -342,11 +359,7 @@ class Client:
         for message in message_generator:
             mes_text = message[DB_COLUMN_NAME_MESSAGE]
             mes_type = message[DB_COLUMN_NAME_MESSAGE_TYPE]
-            if mes_type == FILE:
-                file_name = save_file(mes_text)
-                mes_text = f'FILE saved as {file_name} in {Client.FILE_STORAGE_FOLDER}'
-            else:
-                mes_text = get_text_from_bytes_data(mes_text)
+            mes_text = extract_message(mes_text, mes_type)
             mes_list.append(message_item(not message[DB_COLUMN_NAME_MESSAGE_RECEIVED], mes_text, mes_type))
     # -----------------------------
 
@@ -815,8 +828,7 @@ class ReceivedMessageManager:
         self.add_session_key(data)
 
     def on_db_message(self, data):
-        #self.add_message_from_server_database(data)
-        pass
+        self.add_message_from_server_database(data)
 
     def on_user_offline(self, data):
         # data = [.., 'id']
@@ -907,11 +919,7 @@ class ReceivedMessageManager:
         mes_item = message_item(False, message.message, message.type)
         self.client.add_message_item(sender.id, mes_item, p2p, message.secret)
 
-        if message.type == FILE:
-            file_name = save_file(message.message, rewrite=True)
-            mes_text = f'FILE saved as {file_name} in {Client.FILE_STORAGE_FOLDER}'
-        else:
-            mes_text = message.message
+        mes_text = extract_message(message.message, message.type)
 
         # отображаем
         if not self.client.event_queue:
@@ -941,6 +949,7 @@ class ReceivedMessageManager:
         3) b'SERVER_SECRET_MESSAGE_FROM_DATABASE mes message'
         4) b'SERVER_SECRET_MESSAGE_FROM_DATABASE tag tag'
         5) b'SERVER_SECRET_MESSAGE_FROM_DATABASE nonce nonce'
+        !!!В типах 1 и 3 в самом конце message через пробел записан его тип (FILE или MESSAGE)
         Если пришло сообщение первого типа, можно сразу добавлять его в список сообщений,
         остальные 4 сообщения должны приходить подряд и добавить сообщение можно будет только
         когда придет последнее
@@ -955,16 +964,25 @@ class ReceivedMessageManager:
             sep_pos = message_info.find(b' ')
             sender_id = int(message_info[:sep_pos])
             message_info = message_info[sep_pos+1:]
+
             sep_pos = message_info.find(b' ')
             receiver_id = int(message_info[:sep_pos])
-            message = message_info[sep_pos+1:]
+            message_info = message_info[sep_pos+1:]
+
+            sep_pos = message_info.rfind(b' ')
+            mes_type = int(message_info[sep_pos+1:])
+            message = message_info[:sep_pos]
+
             if self.client.id == sender_id:
                 sender = True
                 friend_id = receiver_id
             else:
                 sender = False
                 friend_id = sender_id
-            message = message_item(sender, get_text_from_bytes_data(message))
+
+            mes_text = extract_message(message, mes_type)
+
+            message = message_item(sender, mes_text, mes_type)
             self.client.friendly_users[friend_id].chat.append(message)
             return
 
@@ -1000,8 +1018,12 @@ class ReceivedMessageManager:
             tag = self.current_secret_message_info[4]
             nonce = self.current_secret_message_info[5]
             message = get_decrypted_message(message, self.session_keys[session_id], tag, nonce, True)
-            message = get_text_from_bytes_data(message)
-            self.client.friendly_users[friend_id].secret_chat.append(message_item(sender, message))
+
+            sep_pos = message.rfind(b' ')
+            mes_type = int(message[sep_pos+1:])
+            message = extract_message(message[:sep_pos], mes_type)
+
+            self.client.friendly_users[friend_id].secret_chat.append(message_item(sender, message, mes_type))
         else:
             # такого быть не должно
             pass
