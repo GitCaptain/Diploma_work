@@ -18,8 +18,10 @@ if __name__ == '__main__':
 
     main_window_handlers = {HANDLER_GET_MESSAGE: user.get_message_history,
                             HANDLER_SEND_MESSAGE: user.send_message,
+                            HANDLER_SEND_FILE: user.send_file,
                             HANDLER_P2P_CONNECTION: user.create_p2p_connection,
-                            HANDLER_SECRET_KEY_EXCHANGE: user.symmetric_key_exchange_with_friend}
+                            HANDLER_SECRET_KEY_EXCHANGE: user.symmetric_key_exchange_with_friend,
+                            HANDLER_EXTRACT_MESSAGE: extract_message}
 
     friend_list_handlers = {HANDLER_ADD_FRIEND: user.add_friend,
                             HANDLER_LOG_OUT: user.log_out,

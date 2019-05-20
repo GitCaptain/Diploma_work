@@ -220,6 +220,7 @@ def send_message_to_client(receiver: User, message: Message, key: bytes, need_en
         return
     for data_part in message_data:
         receiver.socket.sendall(data_part)
+
     receiver.socket.sendall(message)
     receiver.socket.sendall(tag)
     receiver.socket.sendall(nonce)

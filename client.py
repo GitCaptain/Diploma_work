@@ -532,9 +532,9 @@ class Client:
                     print(f"Exception: {e.args}")
                     print(traceback.format_exc())
                     print("id:", target.id)
-                    print("нужно выключить и включить")
+                    print("перезапустите приложение")
                 else:
-                    self.event_queue.put((GUI_CLIENT_ERROR, ))
+                    self.event_queue.put((GUI_CLIENT_ERROR,))
                 break
             finally:
                 pass
@@ -622,6 +622,13 @@ class Client:
 
         send_message_to_client(self.server, message, self.server.symmetric_key)
 
+    def send_file(self, file_path, receiver_id, p2p, secret):
+        with open(file_path, 'rb') as File:
+            message_text = File.read()
+        file_name = os.path.split(file_path)[1]
+        message_text = get_bytes_string(file_name) + b' ' + message_text
+        self.send_message(message_text, receiver_id, p2p, secret, True)
+
     def send_message(self, message_text: str or bytes, receiver_id: int, p2p: bool, secret: bool, file: bool) \
             -> None:
 
@@ -659,7 +666,20 @@ class Client:
             self.thread_locals.message_database.add_message(receiver_id, False, secret, get_bytes_string(message_text),
                                                             _type)
 
-        mes_item = message_item(True, message_text, _type)
+        text_to_show_for_user = extract_message(message_text, _type)
+        if _type == FILE:
+            # TODO как-то очень тупо я получаю имя файла, над переделать
+            # file_name находится между третьим и четвертым пробелом
+            sep = text_to_show_for_user.find(' ')
+            text_to_show_for_user = text_to_show_for_user[sep+1:]
+            sep = text_to_show_for_user.find(' ')
+            text_to_show_for_user = text_to_show_for_user[sep+1:]
+            sep = text_to_show_for_user.find(' ')  # 3 пробел
+            text_to_show_for_user = text_to_show_for_user[sep+1:]
+            sep = text_to_show_for_user.find(' ')  # 4 пробел
+            text_to_show_for_user = text_to_show_for_user[:sep]
+
+        mes_item = message_item(True, text_to_show_for_user, MESSAGE)
         self.add_message_item(receiver_id, mes_item, p2p, secret)
 
         message = Message(mes_type=_type, message=message_text,
@@ -915,11 +935,11 @@ class ReceivedMessageManager:
             self.client.friendly_users[message.sender_id] = Friend(client_id=message.sender_id)
         sender = self.client.friendly_users[message.sender_id]
 
-        # Добавляем в список сообщений клиента
-        mes_item = message_item(False, message.message, message.type)
-        self.client.add_message_item(sender.id, mes_item, p2p, message.secret)
-
         mes_text = extract_message(message.message, message.type)
+
+        # Добавляем в список сообщений клиента
+        mes_item = message_item(False, mes_text, MESSAGE)
+        self.client.add_message_item(sender.id, mes_item, p2p, message.secret)
 
         # отображаем
         if not self.client.event_queue:
