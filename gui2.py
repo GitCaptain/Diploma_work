@@ -24,6 +24,8 @@ HANDLER_SEND_FILE = 'send file'
 HANDLER_P2P_CONNECTION = 'p2p'
 HANDLER_SECRET_KEY_EXCHANGE = 'secret'
 HANDLER_EXTRACT_MESSAGE = 'extract'
+HANDLER_GET_KEY_EXCHANGE_STATUS = 'key stat'
+HANDLER_GET_P2P_CHAT_STATUS = 'p2p stat'
 
 WINDOW_CHANGE_AUTHENTICATION_WINDOW = 'open auth'
 WINDOW_CHANGE_MAIN_WINDOW = 'open main'
@@ -273,6 +275,16 @@ class ChatWindow(Frame):
     def exchange_keys(self):
         self.handlers[HANDLER_SECRET_KEY_EXCHANGE](self.selected_friend_id)
 
+    def update_selected_chat(self):
+        if self.chat_selected == ChatWindow.SELECTED_CHAT:
+            pass
+        elif self.chat_selected == ChatWindow.SELECTED_SECRET_CHAT:
+            self.show_secret_chat(update_state=True)
+        elif self.chat_selected == ChatWindow.SELECTED_P2P_CHAT:
+            self.show_p2p_chat(update_state=True)
+        elif self.chat_selected == ChatWindow.SELECTED_SECRET_P2P_CHAT:
+            self.show_secret_p2p_chat(update_state=True)
+
     def go_back(self):
         self.event_queue.put((WINDOW_CHANGE_FRIEND_LIST_WINDOW, ))
 
@@ -311,25 +323,53 @@ class ChatWindow(Frame):
         self.chat_selected = self.SELECTED_CHAT
         self.chat_info_label.config(text=f"{self.BUTTON_NAME_CHAT} с {self.selected_friend_login}")
         self.chat_button.config(text=self.BUTTON_NAME_CHAT)
+        self.message_entry.config(state=NORMAL)
+        self.send_button.config(state=NORMAL)
+        self.send_file_button.config(state=NORMAL)
         self.update_view(self.selected_friend_id, False, False)
 
-    def show_secret_chat(self):
+    def show_secret_chat(self, update_state=False):
         self.chat_selected = self.SELECTED_SECRET_CHAT
         self.chat_info_label.config(text=f"{self.BUTTON_NAME_SECRET_CHAT} с {self.selected_friend_login}")
+        key_stated = self.handlers[HANDLER_GET_KEY_EXCHANGE_STATUS](self.selected_friend_id)
+        state = DISABLED
+        if key_stated:
+            state = NORMAL
         self.secret_chat_button.config(text=self.BUTTON_NAME_SECRET_CHAT)
-        self.update_view(self.selected_friend_id, True, False)
+        self.message_entry.config(state=state)
+        self.send_button.config(state=state)
+        self.send_file_button.config(state=state)
+        if not update_state:
+            self.update_view(self.selected_friend_id, True, False)
 
-    def show_p2p_chat(self):
+    def show_p2p_chat(self, update_state=False):
         self.chat_selected = self.SELECTED_P2P_CHAT
         self.chat_info_label.config(text=f"{self.BUTTON_NAME_P2P_CHAT} с {self.selected_friend_login}")
+        p2p_stated = self.handlers[HANDLER_GET_P2P_CHAT_STATUS](self.selected_friend_id)
+        state = DISABLED
+        if p2p_stated:
+            state = NORMAL
         self.p2p_chat_button.config(text=self.BUTTON_NAME_P2P_CHAT)
-        self.update_view(self.selected_friend_id, False, True)
+        self.message_entry.config(state=state)
+        self.send_button.config(state=state)
+        self.send_file_button.config(state=state)
+        if not update_state:
+            self.update_view(self.selected_friend_id, False, True)
 
-    def show_secret_p2p_chat(self):
+    def show_secret_p2p_chat(self, update_state=False):
         self.chat_selected = self.SELECTED_SECRET_P2P_CHAT
         self.chat_info_label.config(text=f"{self.BUTTON_NAME_SECRET_P2P_CHAT} с {self.selected_friend_login}")
+        key_stated = self.handlers[HANDLER_GET_KEY_EXCHANGE_STATUS](self.selected_friend_id)
+        p2p_stated = self.handlers[HANDLER_GET_P2P_CHAT_STATUS](self.selected_friend_id)
+        state = DISABLED
+        if p2p_stated and key_stated:
+            state = NORMAL
         self.secret_p2p_chat_button.config(text=self.BUTTON_NAME_SECRET_P2P_CHAT)
-        self.update_view(self.selected_friend_id, True, True)
+        self.message_entry.config(state=state)
+        self.send_button.config(state=state)
+        self.send_file_button.config(state=state)
+        if not update_state:
+            self.update_view(self.selected_friend_id, True, True)
 
     def insert_message(self, text, is_sender):
         if is_sender:
@@ -577,6 +617,8 @@ class GUI:
             self.on_bad_login()
         elif event == GUI_CLIENT_ERROR:
             self.on_client_error(data)
+        elif event == GUI_KEY_STATED:
+            self.on_key_stated()
 
     def on_client_error(self, data):
         # data = ['error mes']
@@ -603,6 +645,7 @@ class GUI:
 
     def on_p2p_connection_done(self):
         showinfo('p2p соединение', 'p2p соединение успешно установлено')
+        self.chat_window.update_selected_chat()
 
     def on_p2p_connection_fail(self):
         showinfo('p2p соединение', 'не удалосьб утсановить p2p соединение')
@@ -625,7 +668,7 @@ class GUI:
         if self.chat_window.selected_friend_id == uid:
             # открыт чат с нужным пользователем
             # TODO: проверять, какой чат обновляем, например если пришло секретное сообщение, а чат открыт обычный, то
-            # TODO: обновлять его не нужно, а нужно поставить * на нужной кнопке
+            # обновлять его не нужно, а нужно поставить * на нужной кнопке
             self.chat_window.update_view(uid, secret, p2p)
         else:
             # TODO Поставить * у нужного друга в списке
@@ -644,11 +687,13 @@ class GUI:
             return
         self.friend_list_window.friend_list_listbox.insert(0, f"{flogin}: {fid}")
 
+    def on_key_stated(self):
+        self.chat_window.update_selected_chat()
+
     def on_close(self):
         if askokcancel("Выйти", "Вы действительно хотите выйти?"):
             self.clear_root()
             self.root.destroy()
-            # TODO вместе с фронтендом выключать бекенд
             self.handlers[STOP_BACKEND]()  # Завершаем не только frontend, но и backend
 
 

@@ -21,7 +21,9 @@ if __name__ == '__main__':
                             HANDLER_SEND_FILE: user.send_file,
                             HANDLER_P2P_CONNECTION: user.create_p2p_connection,
                             HANDLER_SECRET_KEY_EXCHANGE: user.symmetric_key_exchange_with_friend,
-                            HANDLER_EXTRACT_MESSAGE: extract_message}
+                            HANDLER_EXTRACT_MESSAGE: extract_message,
+                            HANDLER_GET_KEY_EXCHANGE_STATUS: user.get_key_exchange_status_with_id,
+                            HANDLER_GET_P2P_CHAT_STATUS: user.get_p2p_status_with_id}
 
     friend_list_handlers = {HANDLER_ADD_FRIEND: user.add_friend,
                             HANDLER_LOG_OUT: user.log_out,

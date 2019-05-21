@@ -488,6 +488,14 @@ class Client:
             self.add_friend(friend_login=friend_login)
     # -----------------------------
 
+    # методы для взаимодействия с пользователем через интерфейс
+    def get_key_exchange_status_with_id(self, id):
+        return True if self.friendly_users[id].symmetric_key else False
+
+    def get_p2p_status_with_id(self, id):
+        return id in self.p2p_connected
+    # -----------------------------
+
     # методы - обработчики
     def server_handler(self, target: Friend = None) -> None:
         if not target:
@@ -744,6 +752,10 @@ class Client:
                                                    f"{self_beg} {self_end} {frnd_beg} {frnd_end} ")
                                   + self_encrypted_key + b' split ' + friend_encrypted_key)
         send_message_to_client(self.server, message, self.server.symmetric_key)
+        if not self.event_queue:
+            print("Ключ установлен")
+        else:
+            self.event_queue.put((GUI_KEY_STATED, ))
 
     def get_friend_list(self):
         for friend in self.friendly_users.values():
@@ -751,7 +763,6 @@ class Client:
 
     def exit_program(self):
         self.time_to_stop = True
-
     # -----------------------------
 
 
@@ -843,6 +854,10 @@ class ReceivedMessageManager:
             self.client.friendly_users[friend_id] = Friend(client_id=friend_id)
         friend = self.client.friendly_users[friend_id]
         friend.symmetric_key = RSA_decrypt(self.client.private_key, encrypted_key)
+        if not self.client.event_queue:
+            print("Ключ установлен")
+        else:
+            self.client.event_queue.put((GUI_KEY_STATED, ))
 
     def on_message_key(self, data):
         self.add_session_key(data)
