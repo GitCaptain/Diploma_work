@@ -1,8 +1,9 @@
 from tkinter import *
 from tkinter.messagebox import *
+from tkinter.filedialog import askopenfilename
 from constants import *
 from queue import Queue, Empty
-from sys import exit
+import os
 
 MESSENGER_NAME = "deep low moan"
 
@@ -19,8 +20,10 @@ HANDLER_LOG_OUT = 'log out'
 HANDLER_DELETE_USER = 'delete user'
 HANDLER_GET_MESSAGE = 'get message'
 HANDLER_SEND_MESSAGE = 'send message'
+HANDLER_SEND_FILE = 'send file'
 HANDLER_P2P_CONNECTION = 'p2p'
 HANDLER_SECRET_KEY_EXCHANGE = 'secret'
+HANDLER_EXTRACT_MESSAGE = 'extract'
 
 WINDOW_CHANGE_AUTHENTICATION_WINDOW = 'open auth'
 WINDOW_CHANGE_MAIN_WINDOW = 'open main'
@@ -230,6 +233,9 @@ class ChatWindow(Frame):
         self.message_frame = Frame(self.chat_frame, height=message_frame_height)
         self.message_frame.pack(side=BOTTOM, fill=X)
 
+        self.send_file_button = PixelSizedButton(self.message_frame, text='файл')
+        self.send_file_button.pack(side=LEFT)
+
         self.message_var = StringVar()
         self.message_entry = EntryWithTemplateString(self.message_frame, templatestring='Введите сообщение:',
                                                      textvariable=self.message_var,
@@ -259,6 +265,8 @@ class ChatWindow(Frame):
         self.message_entry.bind('<Return>', self.send_message)
         self.send_button.config(command=self.send_message)
 
+        self.send_file_button.config(command=self.send_file)
+
     def start_p2p(self):
         self.handlers[HANDLER_P2P_CONNECTION](self.selected_friend_id, True)
 
@@ -268,11 +276,7 @@ class ChatWindow(Frame):
     def go_back(self):
         self.event_queue.put((WINDOW_CHANGE_FRIEND_LIST_WINDOW, ))
 
-    def send_message(self, *args):
-        message = self.message_var.get()
-        if not message or self.message_entry.template_stated:
-            return
-
+    def get_selected_chat_options(self):
         secret, p2p = False, False
         if self.chat_selected == self.SELECTED_SECRET_CHAT:
             secret = True
@@ -281,6 +285,23 @@ class ChatWindow(Frame):
         elif self.chat_selected == self.SELECTED_SECRET_P2P_CHAT:
             secret = True
             p2p = True
+        return secret, p2p
+
+    def send_file(self):
+        file_path = askopenfilename()
+        secret, p2p = self.get_selected_chat_options()
+        file_path, file_name = os.path.split(file_path)
+        if not file_name:
+            return
+        self.insert_message(f'File "{file_name}"', True)
+        self.handlers[HANDLER_SEND_FILE](file_path, file_name, self.selected_friend_id, p2p, secret)
+
+    def send_message(self, *args):
+        message = self.message_var.get()
+        if not message or self.message_entry.template_stated:
+            return
+
+        secret, p2p = self.get_selected_chat_options()
 
         self.message_entry.on_enter_pressed()
         self.insert_message(message, True)
@@ -319,10 +340,12 @@ class ChatWindow(Frame):
         self.dialog_frame_listbox.see(END)
 
     def update_view(self, uid, secret, p2p):
-        # TODO когда сообщения приходят от другого клиента чат сменяется без обновления метки, исправить
+        # TODO когда сообщения приходят от другого клиента чат сменяется без обновления
+        # метки имени пользователя с которым чатимся, исправить
         self.dialog_frame_listbox.delete(0, END)
         for message in self.handlers[HANDLER_GET_MESSAGE](uid, secret, p2p):
-            self.insert_message(message.message, message.is_sender)
+            mes_text = self.handlers[HANDLER_EXTRACT_MESSAGE](message.message, MESSAGE)
+            self.insert_message(mes_text, message.is_sender)
         self.dialog_frame_listbox.see(END)
 
 

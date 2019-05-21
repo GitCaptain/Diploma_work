@@ -214,11 +214,13 @@ def send_message_to_client(receiver: User, message: Message, key: bytes, need_en
     для сервера может стать False. Используется внутри get_prepared_message
     :return:
     """
+    # TODO большие файлы не успевают отправляться, вылетакет socket.TimedOut, разбивать message на части?
     message_data, message, tag, nonce = get_prepared_message(message, key, need_encrypt)
     if not receiver.socket or not message_data:
         return
     for data_part in message_data:
         receiver.socket.sendall(data_part)
+
     receiver.socket.sendall(message)
     receiver.socket.sendall(tag)
     receiver.socket.sendall(nonce)
