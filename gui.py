@@ -439,8 +439,6 @@ class GUI:
         self.even_queue = event_queue
         self.login_window = None
         self.main_window = None
-        # TODO вместе с фронтендом выключать бекенд
-        # self.root.protocol("WM_DELETE_WINDOW", self.on_close)
 
     def run_authentication_window(self):
 
@@ -551,7 +549,7 @@ class GUI:
         if self.main_window.get_selected_friend[1] == uid:
             # открыт чат с нужным пользователем
             # TODO: проверять, какой чат обновляем, например если пришло секретное сообщение, а чат открыт обычный, то
-            # TODO: обновлять его не нужно
+            # обновлять его не нужно
             self.main_window.update_view(uid, secret, p2p)
         else:
             # TODO Поставить * у нужного друга в списке
