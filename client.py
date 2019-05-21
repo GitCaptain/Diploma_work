@@ -622,10 +622,10 @@ class Client:
 
         send_message_to_client(self.server, message, self.server.symmetric_key)
 
-    def send_file(self, file_path, receiver_id, p2p, secret):
-        with open(file_path, 'rb') as File:
+    def send_file(self, file_path, file_name, receiver_id, p2p, secret):
+        with open(file_path+os.sep+file_name, 'rb') as File:
             message_text = File.read()
-        file_name = os.path.split(file_path)[1]
+        file_name = file_name.replace(' ', '_')
         message_text = get_bytes_string(file_name) + b' ' + message_text
         self.send_message(message_text, receiver_id, p2p, secret, True)
 

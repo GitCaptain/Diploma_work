@@ -291,11 +291,10 @@ class ChatWindow(Frame):
         file_path = askopenfilename()
         secret, p2p = self.get_selected_chat_options()
         file_path, file_name = os.path.split(file_path)
-        file_name.replace(' ', '_')
         if not file_name:
             return
         self.insert_message(f'File "{file_name}"', True)
-        self.handlers[HANDLER_SEND_FILE](f'{file_path}{os.sep}{file_name}', self.selected_friend_id, p2p, secret)
+        self.handlers[HANDLER_SEND_FILE](file_path, file_name, self.selected_friend_id, p2p, secret)
 
     def send_message(self, *args):
         message = self.message_var.get()
